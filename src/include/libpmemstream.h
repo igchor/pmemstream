@@ -30,12 +30,9 @@ void pmemstream_delete(struct pmemstream **stream);
 
 // stream owns the region object - the user gets a reference, but it's not
 // necessary to hold on to it and explicitly delete it.
-int pmemstream_tx_region_allocate(struct pmemstream_tx *tx,
-	struct pmemstream *stream, size_t size,
-			       struct pmemstream_region *region);
+int pmemstream_region_allocate(struct pmemstream *stream, size_t size, struct pmemstream_region *region);
 
-int pmemstream_tx_region_free(struct pmemstream_tx *tx,
-	struct pmemstream_region region);
+int pmemstream_region_free(struct pmemstream_region region);
 
 // clearing a region is less expensive than freeing it
 int pmemstream_region_clear(struct pmemstream *stream,
@@ -64,7 +61,7 @@ pmemstream_region_context_delete(struct pmemstream_region_context **rcontext);
 
 // synchronously appends data buffer to the end of the transaction log space
 // fails if no space is available
-int pmemstream_tx_append(struct pmemstream_tx *tx,
+int pmemstream_append(struct pmemstream *stream,
 			 struct pmemstream_region_context *rcontext,
 			 const void *buf, size_t count,
 			 struct pmemstream_entry *entry);
