@@ -25,68 +25,82 @@ enum pmemstream_span_type {
 #define PMEMSTREAM_SPAN_TYPE_MASK (11ULL << 62)
 #define PMEMSTREAM_SPAN_EXTRA_MASK (~PMEMSTREAM_SPAN_TYPE_MASK)
 
+struct pmemstream_span {
+	union {
+		struct {
+			uint64_t type_extra;
+		} common;
+
+		struct {
+			uint64_t type_extra;
+			uint8_t data[];
+		} free;
+
+		struct {
+			uint64_t type_extra;
+			uint8_t data[];
+		} region;
+
+		struct {
+			uint64_t type_extra;
+			uint64_t popcount;
+			uint8_t data[];
+		} entry;
+	};
+};
+
 struct pmemstream_span_runtime {
 	enum pmemstream_span_type type;
 	size_t total_size;
-	uint8_t *data;
-	union {
-		struct {
-			uint64_t size;
-		} free;
-		struct {
-			uint64_t size;
-		} region;
-		struct {
-			uint64_t size;
-			uint64_t popcount;
-		} entry;
-	};
+
+	// XXX : need union once again for size?
+
+	pmemstream_span *span;
 };
 
 static void
 pmemstream_span_create_free(uint64_t *span, size_t data_size)
 {
 	assert((data_size & PMEMSTREAM_SPAN_TYPE_MASK) == 0);
-	span[0] = data_size | PMEMSTREAM_SPAN_FREE;
+	span->common.type_extra = data_size | PMEMSTREAM_SPAN_FREE;
 }
 
 static void
 pmemstream_span_create_entry(uint64_t *span, size_t data_size, size_t popcount)
 {
 	assert((data_size & PMEMSTREAM_SPAN_TYPE_MASK) == 0);
-	span[0] = data_size | PMEMSTREAM_SPAN_ENTRY;
-	span[1] = popcount;
+	span->common.type_extra = data_size | PMEMSTREAM_SPAN_ENTRY;
+	span->entry.popcount = popcount;
 }
 
 static void
 pmemstream_span_create_region(uint64_t *span, size_t size)
 {
 	assert((size & PMEMSTREAM_SPAN_TYPE_MASK) == 0);
-	span[0] = size | PMEMSTREAM_SPAN_REGION;
+	span->common.type_extra = size | PMEMSTREAM_SPAN_REGION;
 }
 
 static struct pmemstream_span_runtime
 pmemstream_span_get_runtime(uint64_t *span)
 {
 	struct pmemstream_span_runtime sr;
-	sr.type = span[0] & PMEMSTREAM_SPAN_TYPE_MASK;
-	uint64_t extra = span[0] & PMEMSTREAM_SPAN_EXTRA_MASK;
+	sr.type = span->common.type_extra & PMEMSTREAM_SPAN_TYPE_MASK;
+	uint64_t extra = span->common.type_extra & PMEMSTREAM_SPAN_EXTRA_MASK;
 	switch (sr.type) {
 		case PMEMSTREAM_SPAN_FREE:
 			sr.free.size = extra;
-			sr.data = (uint8_t *)&span[1];
-			sr.total_size = sr.free.size + MEMBER_SIZE(pmemstream_span_runtime, free);
+			sr.total_size = sr.free.size + MEMBER_SIZE(pmemstream_span, type_extra);
 			break;
 		case PMEMSTREAM_SPAN_ENTRY:
 			sr.entry.size = extra;
 			sr.entry.popcount = span[1];
 			sr.data = (uint8_t *)&span[2];
-			sr.total_size = sr.entry.size + MEMBER_SIZE(pmemstream_span_runtime, entry);
+			sr.total_size = sr.entry.size + MEMBER_SIZE(pmemstream_span, type_extra);
 			break;
 		case PMEMSTREAM_SPAN_REGION:
 			sr.region.size = extra;
 			sr.data = (uint8_t *)&span[1];
-			sr.total_size = sr.region.size + MEMBER_SIZE(pmemstream_span_runtime, region);
+			sr.total_size = sr.region.size + MEMBER_SIZE(pmemstream_span, type_extra);
 			break;
 		default:
 			abort();
