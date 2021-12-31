@@ -97,8 +97,8 @@ if(TESTS_RAPIDCHECK)
 	build_test_ext(NAME concurrent_iterate SRC_FILES unittest/concurrent_iterate.cpp LIBS rapidcheck)
 	add_test_generic(NAME concurrent_iterate TRACERS none)
 
-	build_test_ext(NAME spsc_queue SRC_FILES unittest/spsc_queue.cpp ../src/spsc_queue.c LIBS rapidcheck)
-	add_test_generic(NAME spsc_queue TRACERS none)
+	# build_test_ext(NAME spsc_queue SRC_FILES unittest/spsc_queue.cpp ../src/spsc_queue.c LIBS rapidcheck)
+	# add_test_generic(NAME spsc_queue TRACERS none)
 endif()
 
 if(GDB AND DEBUG_BUILD)

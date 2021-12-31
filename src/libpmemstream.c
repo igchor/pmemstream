@@ -69,6 +69,23 @@ int pmemstream_from_map(struct pmemstream **stream, size_t block_size, size_t bu
 		return -1;
 	}
 
+	for (int i = 0; i < 1024; i++) {
+		// XXX: error
+		pthread_cond_init(&s->lanes[i].cond, NULL);
+	}
+
+	size_t ringbuf_obj_size;
+	size_t ringbuf_worker_size;
+	ringbuf_get_sizes(1024, &ringbuf_obj_size, &ringbuf_worker_size);
+	
+	// XXX: errors
+	s->lanes_ringbuf = malloc(ringbuf_obj_size);
+	ringbuf_setup(s->lanes_ringbuf, 1024, 1024);
+
+	for (int i = 0; i < 1024; i++) {
+		s->lane[i].worker = ringbuf_register(s->lanes_ringbuf, i);
+	}
+
 	*stream = s;
 
 	return 0;
@@ -143,28 +160,16 @@ int pmemstream_get_region_context(struct pmemstream *stream, struct pmemstream_r
 	return region_contexts_map_get_or_create(stream->region_contexts_map, region, region_context);
 }
 
-static int pmemstream_submit_data(struct pmemstream *stream, uint64_t offset, const void *data, size_t size)
-{
-	struct spsc_queue_src_descriptor descriptors[2];
-	descriptors[0].size = sizeof(offset);
-	descriptors[0].data = (const uint8_t *)&offset;
-
-	descriptors[1].size = size;
-	descriptors[1].data = data;
-
-	return spsc_queue_try_enqueue(stream->spsc_memory_buffer, descriptors, 2);
-}
-
-// XXX: alternative submit data: do memcpy in main thread, just offload flushing
 // static int pmemstream_submit_data(struct pmemstream *stream, uint64_t offset, const void *data, size_t size)
 // {
-// 	struct spsc_queue_src_descriptor descriptor;
-// 	descriptor.size = size;
-// 	descriptor.data = data;
+// 	struct spsc_queue_src_descriptor descriptors[2];
+// 	descriptors[0].size = sizeof(offset);
+// 	descriptors[0].data = (const uint8_t *)&offset;
 
-// 	stream->memcpy(stream->span->data + offset, data, size, PMEM2_F_MEM_NODRAIN);
+// 	descriptors[1].size = size;
+// 	descriptors[1].data = data;
 
-// 	return spsc_queue_try_enqueue(stream->spsc_memory_buffer, &descriptor, 1);
+// 	return spsc_queue_try_enqueue(stream->spsc_memory_buffer, descriptors, 2);
 // }
 
 static void pmemstream_set_persisted_offset(struct pmemstream *stream, struct pmemstream_region region,
@@ -181,39 +186,63 @@ static uint64_t pmemstream_get_persisted_offset(struct pmemstream *stream, struc
 	return region_span[1];
 }
 
+// Returns a worker to pool
+static void pmemstream_release_lane(struct pmemstream *stream, struct pmemstream_lane *lane)
+{
+	// XXX:
+}
+
+// Returns first available worker. Waits if none is available
+static struct pmemstream_lane* pmemstream_acquire_lane(struct pmemstream *stream)
+{
+	// XXX (use some kind of lock-free stack????)
+	return &stream->lanes[0];
+}
+
+static void pmemstream_on_append_commit_cb(struct pmemstream *stream, struct pmemstream_lane *lane)
+{
+	
+}
+
+static int pmemstream_submit_data(struct pmemstream *stream, ringbuf_worker_t *worker, struct pmemstream_region_context *region_context, uint64_t offset, const void *data, size_t size, void *cb_arg)
+{
+	/* local_append_offset is basically X bytes after append_offset. X is equal to sum of sizes from other appends which happened before. */
+	/* As a bonuse local_append_offset is also lane ID. NOT REAYLLU, 1 has to be replaced to make offset thing work */
+	size_t local_append_offset = ringbuf_acquire(stream->lanes_ringbuf, worker, 1);
+	size_t append_offset = pmemstream_get_persisted_offset(stream, region) + local_append_offset;
+
+	struct pmemstream_lane *lane = &stream->lanes[local_append_offset];
+
+	stream->memcpy(pmemstream_offset_to_ptr(stream, append_offset), data, size, PMEM2_F_MEM_NODRAIN);
+	lane->offset = append_offset;
+
+	ringbuf_produce(stream->lanes_ringbuf, worker);
+
+	// XXX: wrap those into futures
+	pthread_cond_wait(&lane->commit_cond, /*TODO: MUTEX*/);   
+	pthread_cond_wait(&lane->persistent_cond, /*TODO: MUTEX*/);   
+}
+
 // Might be called from different thread than append
 void pmemstream_persist(struct pmemstream *stream, struct pmemstream_region region, struct pmemstream_entry entry)
 {
 	uint64_t persisted_offset = pmemstream_get_persisted_offset(stream, region);
 
-	if (persisted_offset >= entry.offset)
-		return;
-
 	while (persisted_offset < entry.offset) {
-		struct spsc_queue_src_descriptor descriptor1;
-		struct spsc_queue_src_descriptor descriptor2;
-		int ret = spsc_queue_try_dequeue_start(stream->spsc_memory_buffer, &descriptor1, &descriptor2);
-		/* There is nothing in the queue, we must have persisted everything */
-		// XXX: what about writes which omitted the buffer?
-		assert(ret == 0);
+		/* process transactions in order of offsets. */
+		size_t local_append_offset;
+		size_t to_consume = ringbuf_consume(stream->lanes_ringbuf, &local_append_offset);
 
-		// XXX: strict aliasing?
-		struct memory_entry *me = (struct memory_entry *)descriptor1.data;
+		for (size_t i = 0; i < to_consume)
 
-		span_create_entry(stream, me->offset, me->data, descriptor1.size);
-		persisted_offset = me->offset + descriptor1.size;
+		stream->persist(pmemstream_offset_to_ptr(stream, persisted_offset + local_append_offset), to_consume);
 
-		spsc_queue_dequeue_finish(stream->spsc_memory_buffer, descriptor1.size);
-		// XXX - handle descriptor 2
+		persisted_offset += to_consume;
+		pmemstream_set_persisted_offset(stream, region, persisted_offset);
+
+		// XXX: avoid spin, add conditional variable or something
 	}
-	assert(persisted_offset > pmemstream_get_persisted_offset(stream, region));
-	stream->drain();
-
-	pmemstream_set_persisted_offset(stream, region, persisted_offset);
 }
-
-// XXX: alternative pmemstream_persist which just flushes:
-// TODO
 
 // synchronously appends data buffer to the end of the region
 int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region,
@@ -253,10 +282,9 @@ int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region
 		new_entry->offset = offset;
 	}
 
-	ret = pmemstream_submit_data(stream, offset, data, size);
-	if (ret) {
-		// XXX: just copy the data ourselves, without using buffer?
-	}
+	struct pmemstream_lane *lane = pmemstream_acquire_lane(stream);
+
+	pmemstream_submit_data(stream, lane, offset, data, size);
 
 	region_context->append_offset = new_offset;
 	region_context->commited_offset = new_offset;
