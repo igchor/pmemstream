@@ -56,6 +56,7 @@ static size_t spsc_queue_get_free(uint64_t read_pos, uint64_t write_pos, size_t 
 	 * if read_pos == write_pos, queue is empty (free_space = s->size - 8)
 	 * if read_pos == write_pos + 8, queue is full (free_space = 0)
 	 */
+	assert(ret > 8);
 	return ret - 8;
 }
 
@@ -70,13 +71,8 @@ static size_t spsc_queue_get_available(uint64_t read_pos, uint64_t write_pos, si
 	}
 }
 
-int spsc_queue_try_enqueue(struct spsc_queue *s, struct spsc_queue_src_descriptor *descriptors, size_t num_descriptors)
+size_t ringbuf_acquire(struct spsc_queue *s, size_t size)
 {
-	size_t size = 0;
-	for (size_t i = 0; i < num_descriptors; i++) {
-		size += descriptors[i].size;
-	}
-
 	/* read_pos can be concurrently modified by try_dequeue hence the load. */
 	uint64_t read_pos = __atomic_load_n(&s->read_pos, __ATOMIC_ACQUIRE);
 	uint64_t write_pos = s->write_pos;
@@ -90,44 +86,26 @@ int spsc_queue_try_enqueue(struct spsc_queue *s, struct spsc_queue_src_descripto
 	}
 
 	/* There must always be at least 8 bytes at the end .*/
-	assert(write_pos <= s->size - sizeof(size));
+	assert(s->write_pos <= s->size - sizeof(size));
 
-	/* Save size of the entry. */
-	*((uint64_t *)(s->data + write_pos)) = size;
-	write_pos += sizeof(size);
+	return write_pos;
+}
 
+void spsc_queue_try_produce(struct spsc_queue *s, size_t size)
+{
 	if (size == 0) {
-		return 0;
+		return;
 	}
 
-	for (size_t i = 0; i < num_descriptors; i++) {
-		size_t remaining_to_wrap = s->size - write_pos;
-		size_t first_copy = remaining_to_wrap < descriptors[i].size ? remaining_to_wrap : descriptors[i].size;
-		memcpy(s->data + write_pos, descriptors[i].data, first_copy);
-
-		if (descriptors[i].size - first_copy) {
-			/* Wrapround. */
-			size_t remaining = descriptors[i].size - first_copy;
-			memcpy(s->data, descriptors[i].data + first_copy, remaining);
-			write_pos = remaining;
-		} else {
-			/* No wrapround. */
-			write_pos += first_copy;
-		}
-	}
-
-	write_pos = ALIGN_UP(write_pos, 8ULL);
+	size_t write_pos = ALIGN_UP(s->write_pos, sizeof(uint64_t));
 	if (write_pos >= s->size) {
 		write_pos = 0;
 	}
 
 	__atomic_store_n(&s->write_pos, write_pos, __ATOMIC_RELEASE);
-
-	return 0;
 }
 
-int spsc_queue_try_dequeue_start(struct spsc_queue *s, struct spsc_queue_src_descriptor *descriptor1,
-				 struct spsc_queue_src_descriptor *descriptor2)
+int spsc_queue_try_consume(struct spsc_queue *s, size_t *user_offset, size_t *user_size)
 {
 	/* write_pos can be concurrently modified by try_enqueue hence the load. */
 	uint64_t read_pos = s->read_pos;
@@ -141,31 +119,13 @@ int spsc_queue_try_dequeue_start(struct spsc_queue *s, struct spsc_queue_src_des
 		return -1;
 	}
 
-	uint64_t size = *((uint64_t *)(s->data + read_pos));
-	read_pos += sizeof(uint64_t);
-
-	assert(available_bytes >= size + sizeof(uint64_t));
-
-	if (size > s->size - read_pos) {
-		/* Wrapround. */
-		descriptor1->size = s->size - read_pos;
-		descriptor1->data = s->data + read_pos;
-
-		descriptor2->size = size - descriptor1->size;
-		descriptor2->data = s->data;
-	} else {
-		/* No wrapround. */
-		descriptor1->size = size;
-		descriptor1->data = s->data + read_pos;
-
-		descriptor2->size = 0;
-		descriptor2->data = NULL;
-	}
+	*user_offset = read_pos;
+	*user_size = available_bytes;
 
 	return 0;
 }
 
-void spsc_queue_dequeue_finish(struct spsc_queue *s, size_t size)
+void spsc_queue_release(struct spsc_queue *s, size_t size)
 {
 	size += sizeof(uint64_t);
 

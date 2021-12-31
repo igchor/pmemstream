@@ -31,10 +31,9 @@ struct spsc_queue { // XXX: CACHELINE_ALIGNED
 
 struct spsc_queue *spsc_queue_new(size_t size);
 void spsc_queue_destroy(struct spsc_queue *s);
-int spsc_queue_try_enqueue(struct spsc_queue *s, struct spsc_queue_src_descriptor *descriptors, size_t num_descriptors);
-int spsc_queue_try_dequeue_start(struct spsc_queue *s, struct spsc_queue_src_descriptor *descriptor1,
-				 struct spsc_queue_src_descriptor *descriptor2);
-void spsc_queue_dequeue_finish(struct spsc_queue *s, size_t size);
+int spsc_queue_try_produce(struct spsc_queue *s, size_t size);
+int spsc_queue_try_consume(struct spsc_queue *s, size_t *offset, size_t *size);
+void spsc_queue_release(struct spsc_queue *s, size_t size);
 
 #ifdef __cplusplus
 } /* end extern "C" */
