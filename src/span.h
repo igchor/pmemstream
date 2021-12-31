@@ -45,10 +45,10 @@ struct span_runtime {
 		} empty;
 		struct {
 			uint64_t size;
+			uint64_t persisted_offset; // XXX: keep copy of this in DRAM and always read from DRAM?
 		} region;
 		struct {
 			uint64_t size;
-			uint64_t popcount;
 		} entry;
 	};
 };

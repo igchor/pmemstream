@@ -9,6 +9,7 @@
 #include "unittest.hpp"
 
 static constexpr size_t stream_size = 1024 * 1024;
+static constexpr size_t buffer_size = 4096;
 
 int main(int argc, char *argv[])
 {
@@ -32,7 +33,7 @@ int main(int argc, char *argv[])
 					 static constexpr size_t region_size = stream_size - 16 * 1024;
 					 static constexpr size_t block_size = 4096;
 
-					 auto stream = make_pmemstream(file, block_size, stream_size);
+					 auto stream = make_pmemstream(file, block_size, buffer_size, stream_size);
 					 auto region = initialize_stream_single_region(stream.get(), region_size, data);
 					 verify(stream.get(), region, data, {});
 					 append(stream.get(), region, NULL, extra_data);
@@ -40,48 +41,50 @@ int main(int argc, char *argv[])
 					 RC_ASSERT(pmemstream_region_free(stream.get(), region) == 0);
 				 });
 
-		ret += rc::check("verify if iteration return proper elements after pmemstream reopen",
-				 [&](const std::vector<std::string> &data, const std::vector<std::string> &extra_data,
-				     bool user_created_context) {
-					 static constexpr size_t region_size = stream_size - 16 * 1024;
-					 static constexpr size_t block_size = 4096;
-					 pmemstream_region region;
-					 {
-						 auto stream = make_pmemstream(file, block_size, stream_size);
-						 region = initialize_stream_single_region(stream.get(), region_size,
-											  data);
-						 verify(stream.get(), region, data, {});
-					 }
-					 {
-						 auto stream = make_pmemstream(file, block_size, stream_size, false);
-						 verify(stream.get(), region, data, {});
-						 RC_ASSERT(pmemstream_region_free(stream.get(), region) == 0);
-					 }
-				 });
+		ret += rc::check(
+			"verify if iteration return proper elements after pmemstream reopen",
+			[&](const std::vector<std::string> &data, const std::vector<std::string> &extra_data,
+			    bool user_created_context) {
+				static constexpr size_t region_size = stream_size - 16 * 1024;
+				static constexpr size_t block_size = 4096;
+				pmemstream_region region;
+				{
+					auto stream = make_pmemstream(file, block_size, buffer_size, stream_size);
+					region = initialize_stream_single_region(stream.get(), region_size, data);
+					verify(stream.get(), region, data, {});
+				}
+				{
+					auto stream =
+						make_pmemstream(file, block_size, buffer_size, stream_size, false);
+					verify(stream.get(), region, data, {});
+					RC_ASSERT(pmemstream_region_free(stream.get(), region) == 0);
+				}
+			});
 
-		ret += rc::check("verify if iteration return proper elements after append after pmemstream reopen",
-				 [&](const std::vector<std::string> &data, const std::vector<std::string> &extra_data,
-				     bool user_created_context) {
-					 static constexpr size_t region_size = stream_size - 16 * 1024;
-					 static constexpr size_t block_size = 4096;
-					 pmemstream_region region;
-					 {
-						 auto stream = make_pmemstream(file, block_size, stream_size);
-						 region = initialize_stream_single_region(stream.get(), region_size,
-											  data);
-						 verify(stream.get(), region, data, {});
-					 }
-					 {
-						 auto stream = make_pmemstream(file, block_size, stream_size, false);
-						 pmemstream_region_context *ctx = NULL;
-						 if (user_created_context) {
-							 pmemstream_get_region_context(stream.get(), region, &ctx);
-						 }
+		ret += rc::check(
+			"verify if iteration return proper elements after append after pmemstream reopen",
+			[&](const std::vector<std::string> &data, const std::vector<std::string> &extra_data,
+			    bool user_created_context) {
+				static constexpr size_t region_size = stream_size - 16 * 1024;
+				static constexpr size_t block_size = 4096;
+				pmemstream_region region;
+				{
+					auto stream = make_pmemstream(file, block_size, buffer_size, stream_size);
+					region = initialize_stream_single_region(stream.get(), region_size, data);
+					verify(stream.get(), region, data, {});
+				}
+				{
+					auto stream =
+						make_pmemstream(file, block_size, buffer_size, stream_size, false);
+					pmemstream_region_context *ctx = NULL;
+					if (user_created_context) {
+						pmemstream_get_region_context(stream.get(), region, &ctx);
+					}
 
-						 append(stream.get(), region, ctx, extra_data);
-						 verify(stream.get(), region, data, extra_data);
-						 RC_ASSERT(pmemstream_region_free(stream.get(), region) == 0);
-					 }
-				 });
+					append(stream.get(), region, ctx, extra_data);
+					verify(stream.get(), region, data, extra_data);
+					RC_ASSERT(pmemstream_region_free(stream.get(), region) == 0);
+				}
+			});
 	});
 }

@@ -66,7 +66,7 @@ int main(int argc, char *argv[])
 	}
 
 	struct pmemstream *stream;
-	int ret = pmemstream_from_map(&stream, 4096, map);
+	int ret = pmemstream_from_map(&stream, 4096, 4096, map);
 	if (ret == -1) {
 		fprintf(stderr, "pmemstream_from_map failed\n");
 		return ret;

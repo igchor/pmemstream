@@ -81,7 +81,7 @@ struct return_check {
 	bool status = true;
 };
 
-auto make_pmemstream(const std::string &file, size_t block_size, size_t size, bool truncate = true)
+auto make_pmemstream(const std::string &file, size_t block_size, size_t buffer_size, size_t size, bool truncate = true)
 {
 	struct pmem2_map *map = map_open(file.c_str(), size, truncate);
 	if (map == NULL) {
@@ -92,7 +92,7 @@ auto make_pmemstream(const std::string &file, size_t block_size, size_t size, bo
 	auto map_uptr = std::unique_ptr<struct pmem2_map, decltype(map_delete)>(map, map_delete);
 
 	struct pmemstream *stream;
-	int ret = pmemstream_from_map(&stream, block_size, map);
+	int ret = pmemstream_from_map(&stream, block_size, buffer_size, map);
 	if (ret == -1) {
 		throw std::runtime_error("pmemstream_from_map failed");
 	}

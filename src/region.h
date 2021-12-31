@@ -38,9 +38,11 @@ struct pmemstream_region_context {
 	uint64_t append_offset;
 
 	/*
-	 * All entires with offset < commited_offset are commited and safe to read.
-	 */
+	 * Entries up to this offset are commited (can be safely read) but might not yet be persistend. */
 	uint64_t commited_offset;
+
+	// XXX: keep a copy of persisted_offset here for faster reads.
+	uint64_t persisted_offset;
 };
 
 /*

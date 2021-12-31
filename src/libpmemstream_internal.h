@@ -10,6 +10,7 @@
 #include "libpmemstream.h"
 #include "region.h"
 #include "span.h"
+#include "spsc_queue.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -27,6 +28,11 @@ struct pmemstream_data {
 	span_bytes spans[];
 };
 
+struct memory_entry {
+	uint64_t offset;
+	uint8_t data[];
+};
+
 struct pmemstream {
 	struct pmemstream_data *data;
 	size_t stream_size;
@@ -40,6 +46,10 @@ struct pmemstream {
 	pmem2_persist_fn persist;
 
 	struct region_contexts_map *region_contexts_map;
+
+	// XXX: iterators/users can read from spsc_queue using optimistic concurrency control,
+	// to read commited but not yet persisted data.
+	struct spsc_queue *spsc_memory_buffer;
 };
 
 static inline uint8_t *pmemstream_offset_to_ptr(struct pmemstream *stream, uint64_t offset)

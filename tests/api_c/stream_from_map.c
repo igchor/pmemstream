@@ -13,7 +13,7 @@ void test_stream_from_map(char *path, size_t file_size, size_t blk_size)
 	UT_ASSERTne(map, NULL);
 
 	struct pmemstream *s = NULL;
-	pmemstream_from_map(&s, blk_size, map);
+	pmemstream_from_map(&s, blk_size, 4096, map);
 	UT_ASSERTne(s, NULL);
 
 	pmemstream_delete(&s);

@@ -30,7 +30,7 @@ struct pmemstream_entry {
 
 // manages lifecycle of the stream. Can be based on top of a raw pmem2_map
 // or a pmemset (TBD).
-int pmemstream_from_map(struct pmemstream **stream, size_t block_size, struct pmem2_map *map);
+int pmemstream_from_map(struct pmemstream **stream, size_t block_size, size_t buffer_size, struct pmem2_map *map);
 void pmemstream_delete(struct pmemstream **stream);
 
 // stream owns the region object - the user gets a reference, but it's not

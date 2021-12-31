@@ -85,12 +85,8 @@ int pmemstream_entry_iterator_new(struct pmemstream_entry_iterator **iterator, s
 
 static int validate_entry(struct pmemstream *stream, struct pmemstream_entry entry)
 {
-	struct span_runtime srt = span_get_runtime(stream, entry.offset);
-	void *entry_data = pmemstream_offset_to_ptr(stream, srt.data_offset);
-	if (srt.type == SPAN_ENTRY && util_popcount_memory(entry_data, srt.entry.size) == srt.entry.popcount) {
-		return 0;
-	}
-	return -1;
+	// XXX
+	return 0;
 }
 
 /* Advances entry iterator by one. Verifies entry integrity and recovers the region if necessary. */

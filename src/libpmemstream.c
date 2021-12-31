@@ -40,7 +40,7 @@ static void pmemstream_init(struct pmemstream *stream)
 		       PMEM2_F_MEM_NONTEMPORAL);
 }
 
-int pmemstream_from_map(struct pmemstream **stream, size_t block_size, struct pmem2_map *map)
+int pmemstream_from_map(struct pmemstream **stream, size_t block_size, size_t buffer_size, struct pmem2_map *map)
 {
 	struct pmemstream *s = malloc(sizeof(struct pmemstream));
 	s->data = pmem2_map_get_address(map);
@@ -60,6 +60,12 @@ int pmemstream_from_map(struct pmemstream **stream, size_t block_size, struct pm
 
 	s->region_contexts_map = region_contexts_map_new();
 	if (!s->region_contexts_map) {
+		return -1;
+	}
+
+	s->spsc_memory_buffer = spsc_queue_new(buffer_size);
+	if (!s->spsc_memory_buffer) {
+		// XXX: free regions
 		return -1;
 	}
 
@@ -137,10 +143,77 @@ int pmemstream_get_region_context(struct pmemstream *stream, struct pmemstream_r
 	return region_contexts_map_get_or_create(stream->region_contexts_map, region, region_context);
 }
 
-// static int pmemstream_mark_data_copied(struct pmemstream *stream, uint64_t offset)
-// {
+static int pmemstream_submit_data(struct pmemstream *stream, uint64_t offset, const void *data, size_t size)
+{
+	struct spsc_queue_src_descriptor descriptors[2];
+	descriptors[0].size = sizeof(offset);
+	descriptors[0].data = (const uint8_t *)&offset;
 
+	descriptors[1].size = size;
+	descriptors[1].data = data;
+
+	return spsc_queue_try_enqueue(stream->spsc_memory_buffer, descriptors, 2);
+}
+
+// XXX: alternative submit data: do memcpy in main thread, just offload flushing
+// static int pmemstream_submit_data(struct pmemstream *stream, uint64_t offset, const void *data, size_t size)
+// {
+// 	struct spsc_queue_src_descriptor descriptor;
+// 	descriptor.size = size;
+// 	descriptor.data = data;
+
+// 	stream->memcpy(stream->span->data + offset, data, size, PMEM2_F_MEM_NODRAIN);
+
+// 	return spsc_queue_try_enqueue(stream->spsc_memory_buffer, &descriptor, 1);
 // }
+
+static void pmemstream_set_persisted_offset(struct pmemstream *stream, struct pmemstream_region region,
+					    uint64_t persisted_offset)
+{
+	span_bytes *region_span = span_offset_to_span_ptr(stream, region.offset);
+	region_span[1] = persisted_offset;
+	stream->persist(region_span + 1, sizeof(region_span[1]));
+}
+
+static uint64_t pmemstream_get_persisted_offset(struct pmemstream *stream, struct pmemstream_region region)
+{
+	span_bytes *region_span = span_offset_to_span_ptr(stream, region.offset);
+	return region_span[1];
+}
+
+// Might be called from different thread than append
+void pmemstream_persist(struct pmemstream *stream, struct pmemstream_region region, struct pmemstream_entry entry)
+{
+	uint64_t persisted_offset = pmemstream_get_persisted_offset(stream, region);
+
+	if (persisted_offset >= entry.offset)
+		return;
+
+	while (persisted_offset < entry.offset) {
+		struct spsc_queue_src_descriptor descriptor1;
+		struct spsc_queue_src_descriptor descriptor2;
+		int ret = spsc_queue_try_dequeue_start(stream->spsc_memory_buffer, &descriptor1, &descriptor2);
+		/* There is nothing in the queue, we must have persisted everything */
+		// XXX: what about writes which omitted the buffer?
+		assert(ret == 0);
+
+		// XXX: strict aliasing?
+		struct memory_entry *me = (struct memory_entry *)descriptor1.data;
+
+		span_create_entry(stream, me->offset, me->data, descriptor1.size);
+		persisted_offset = me->offset + descriptor1.size;
+
+		spsc_queue_dequeue_finish(stream->spsc_memory_buffer, descriptor1.size);
+		// XXX - handle descriptor 2
+	}
+	assert(persisted_offset > pmemstream_get_persisted_offset(stream, region));
+	stream->drain();
+
+	pmemstream_set_persisted_offset(stream, region, persisted_offset);
+}
+
+// XXX: alternative pmemstream_persist which just flushes:
+// TODO
 
 // synchronously appends data buffer to the end of the region
 int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region,
@@ -167,7 +240,6 @@ int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region
 	uint64_t offset = region_context->append_offset;
 	uint64_t new_offset = offset + entry_total_size_span_aligned;
 
-	/* XXX: should we revert this fetch_add if no space left? What about concurrent appends? */
 	/* region overflow (no space left) or offset outside of region. */
 	if (new_offset + entry_total_size_span_aligned > region.offset + region_srt.total_size) {
 		return -1;
@@ -181,35 +253,13 @@ int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region
 		new_entry->offset = offset;
 	}
 
-	// XXX: doing nontemporal memcpy in main thread is not the best idea - any barrier would mean
-	// we need to wait for memcpy to finish going to PMEM.
+	ret = pmemstream_submit_data(stream, offset, data, size);
+	if (ret) {
+		// XXX: just copy the data ourselves, without using buffer?
+	}
 
-	span_create_entry(stream, offset, data, size);
-
-	// Will this atomic store impact performance with __ATOMIC_RELEASE? This is a barrier after all...
-	// Should this be __ATOMIC_RELAXED???
-	// WE can also avoid doing copy in this thread at all. We could require user to keep data buffer
-	// for as long as... some future is not completed? (or allocate the buffer ourselves).
-	// Then we could just send pointer to the data to a bg thread. (Maybe have two versions of append for different
-	// buffer management options????)
-	//
-	//
-	// Possibly, if the buffer is always at the same location we could even pin the Cachelines (not use main memory at all??)
-	__atomic_store_n(&region_context->append_offset, new_offset, __ATOMIC_RELEASE);
-
-	// 2 Approaches:
-	// - increment on append_start:
-	//	need to keep lanes to track which thread (tx) commited:
-	// 	we can have a buffer (with pinned cache lines?) of fixed length (this means cap on max number of tx/threads)
-	//  entries in pmem would have tagged txid (if no tag, data is already on pmem - data is commited and persistent
-	//  if there is a tag, data is commited and in buffer)
-	// - increment (txid) on append commit
-	// 	must block all threads until txid == append_offset??? (only one thread per region)
-	region_context->
+	region_context->append_offset = new_offset;
+	region_context->commited_offset = new_offset;
 
 	return 0;
 }
-
-// XXX: NOTES:
-// FIRST STEP: concurrent processes can only see data commited to PMEM (otherwise runtime data would have to be synchronized).
-//

@@ -29,12 +29,10 @@ void span_create_entry(struct pmemstream *stream, uint64_t offset, const void *d
 	span_bytes *span = span_offset_to_span_ptr(stream, offset);
 	assert((data_size & SPAN_TYPE_MASK) == 0);
 	span[0] = data_size | SPAN_ENTRY;
-	span[1] = 0;
 
 	// XXX - use variadic mempcy to store data and metadata at once
 	void *dest = ((uint8_t *)span) + SPAN_ENTRY_METADATA_SIZE;
 	stream->memcpy(dest, data, data_size, PMEM2_F_MEM_NONTEMPORAL | PMEM2_F_MEM_NODRAIN);
-	stream->persist(span, SPAN_ENTRY_METADATA_SIZE);
 }
 
 void span_create_region(struct pmemstream *stream, uint64_t offset, size_t size)
@@ -42,6 +40,7 @@ void span_create_region(struct pmemstream *stream, uint64_t offset, size_t size)
 	span_bytes *span = span_offset_to_span_ptr(stream, offset);
 	assert((size & SPAN_TYPE_MASK) == 0);
 	span[0] = size | SPAN_REGION;
+	span[1] = 0;
 
 	stream->persist(span, SPAN_REGION_METADATA_SIZE);
 }
@@ -80,7 +79,6 @@ struct span_runtime span_get_entry_runtime(struct pmemstream *stream, uint64_t o
 
 	srt.type = SPAN_ENTRY;
 	srt.entry.size = span_get_size(span);
-	srt.entry.popcount = span[1];
 	srt.data_offset = offset + SPAN_ENTRY_METADATA_SIZE;
 	srt.total_size = ALIGN_UP(srt.entry.size + SPAN_ENTRY_METADATA_SIZE, sizeof(span_bytes));
 
