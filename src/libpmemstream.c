@@ -137,6 +137,11 @@ int pmemstream_get_region_context(struct pmemstream *stream, struct pmemstream_r
 	return region_contexts_map_get_or_create(stream->region_contexts_map, region, region_context);
 }
 
+// static int pmemstream_mark_data_copied(struct pmemstream *stream, uint64_t offset)
+// {
+
+// }
+
 // synchronously appends data buffer to the end of the region
 int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region,
 		      struct pmemstream_region_context *region_context, const void *data, size_t size,
@@ -159,16 +164,16 @@ int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region
 		return ret;
 	}
 
-	uint64_t offset =
-		__atomic_fetch_add(&region_context->append_offset, entry_total_size_span_aligned, __ATOMIC_RELEASE);
+	uint64_t offset = region_context->append_offset;
+	uint64_t new_offset = offset + entry_total_size_span_aligned;
 
 	/* XXX: should we revert this fetch_add if no space left? What about concurrent appends? */
 	/* region overflow (no space left) or offset outside of region. */
-	if (offset + entry_total_size_span_aligned > region.offset + region_srt.total_size) {
+	if (new_offset + entry_total_size_span_aligned > region.offset + region_srt.total_size) {
 		return -1;
 	}
 	/* offset outside of region */
-	if (offset < region_srt.data_offset) {
+	if (new_offset < region_srt.data_offset) {
 		return -1;
 	}
 
@@ -176,7 +181,35 @@ int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region
 		new_entry->offset = offset;
 	}
 
-	span_create_entry(stream, offset, data, size, util_popcount_memory(data, size));
+	// XXX: doing nontemporal memcpy in main thread is not the best idea - any barrier would mean
+	// we need to wait for memcpy to finish going to PMEM.
+
+	span_create_entry(stream, offset, data, size);
+
+	// Will this atomic store impact performance with __ATOMIC_RELEASE? This is a barrier after all...
+	// Should this be __ATOMIC_RELAXED???
+	// WE can also avoid doing copy in this thread at all. We could require user to keep data buffer
+	// for as long as... some future is not completed? (or allocate the buffer ourselves).
+	// Then we could just send pointer to the data to a bg thread. (Maybe have two versions of append for different
+	// buffer management options????)
+	//
+	//
+	// Possibly, if the buffer is always at the same location we could even pin the Cachelines (not use main memory at all??)
+	__atomic_store_n(&region_context->append_offset, new_offset, __ATOMIC_RELEASE);
+
+	// 2 Approaches:
+	// - increment on append_start:
+	//	need to keep lanes to track which thread (tx) commited:
+	// 	we can have a buffer (with pinned cache lines?) of fixed length (this means cap on max number of tx/threads)
+	//  entries in pmem would have tagged txid (if no tag, data is already on pmem - data is commited and persistent
+	//  if there is a tag, data is commited and in buffer)
+	// - increment (txid) on append commit
+	// 	must block all threads until txid == append_offset??? (only one thread per region)
+	region_context->
 
 	return 0;
 }
+
+// XXX: NOTES:
+// FIRST STEP: concurrent processes can only see data commited to PMEM (otherwise runtime data would have to be synchronized).
+//

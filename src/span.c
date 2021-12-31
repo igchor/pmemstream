@@ -24,12 +24,12 @@ void span_create_empty(struct pmemstream *stream, uint64_t offset, size_t data_s
 	stream->persist(span, SPAN_EMPTY_METADATA_SIZE);
 }
 
-void span_create_entry(struct pmemstream *stream, uint64_t offset, const void *data, size_t data_size, size_t popcount)
+void span_create_entry(struct pmemstream *stream, uint64_t offset, const void *data, size_t data_size)
 {
 	span_bytes *span = span_offset_to_span_ptr(stream, offset);
 	assert((data_size & SPAN_TYPE_MASK) == 0);
 	span[0] = data_size | SPAN_ENTRY;
-	span[1] = popcount;
+	span[1] = 0;
 
 	// XXX - use variadic mempcy to store data and metadata at once
 	void *dest = ((uint8_t *)span) + SPAN_ENTRY_METADATA_SIZE;

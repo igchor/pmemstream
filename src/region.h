@@ -36,6 +36,11 @@ struct pmemstream_region_context {
 	 * Offset at which new entries will be appended. If set to PMEMSTREAM_OFFSET_UNINITIALIZED it means
 	 * that region was not yet recovered. */
 	uint64_t append_offset;
+
+	/*
+	 * All entires with offset < commited_offset are commited and safe to read.
+	 */
+	uint64_t commited_offset;
 };
 
 /*
