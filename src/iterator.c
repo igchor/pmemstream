@@ -93,11 +93,25 @@ err:
 	return ret;
 }
 
+// XXX: add parameter to tell if we're insterested in persisted or just commited
+static int validate_txid(uint64_t txid)
+{
+	if (txid & TXID_INVALID_BIT == 0) {
+		// XXX compare against user_provided txid?
+		return 0;
+	}
+	struct tx_context *txc = (struct tx_context*)(txid & TXID_EXTRA_MASK);
+	if (txc->txid != TXID_INVALID_BIT) {
+		return 0;
+	}
+	return -1;
+}
+
 static int validate_entry(struct pmemstream *stream, struct pmemstream_entry entry)
 {
 	struct span_runtime srt = span_get_runtime(stream, entry.offset);
 	void *entry_data = pmemstream_offset_to_ptr(stream, srt.data_offset);
-	if (srt.type == SPAN_ENTRY && util_popcount_memory(entry_data, srt.entry.size) == srt.entry.popcount) {
+	if (srt.type == SPAN_ENTRY && validate_txid(srt.entry.txid) == 0) {
 		return 0;
 	}
 	return -1;

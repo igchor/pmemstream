@@ -35,6 +35,9 @@ enum span_type { SPAN_EMPTY = 00ULL << 62, SPAN_REGION = 11ULL << 62, SPAN_ENTRY
 #define SPAN_TYPE_MASK (11ULL << 62)
 #define SPAN_EXTRA_MASK (~SPAN_TYPE_MASK)
 
+#define TXID_INVALID_BIT (1ULL << 63)
+#define TXID_EXTRA_MASK (~TXID_INVALID_BIT)
+
 struct span_runtime {
 	enum span_type type;
 	size_t total_size;
@@ -45,10 +48,11 @@ struct span_runtime {
 		} empty;
 		struct {
 			uint64_t size;
+			uint64_t persisted_offset;
 		} region;
 		struct {
 			uint64_t size;
-			uint64_t popcount;
+			uint64_t txid;
 		} entry;
 	};
 };
@@ -64,8 +68,9 @@ span_bytes *span_offset_to_span_ptr(struct pmemstream *stream, uint64_t offset);
 
 /* Those functions create appropriate span at specified offset. offset must be 8-bytes aligned. */
 void span_create_empty(struct pmemstream *stream, uint64_t offset, size_t data_size);
-void span_create_entry(struct pmemstream *stream, uint64_t offset, const void *data, size_t data_size, size_t popcount);
 void span_create_region(struct pmemstream *stream, uint64_t offset, size_t size);
+
+void span_create_entry(struct pmemstream *stream, uint64_t offset, const void *data, size_t data_size, void *context);
 
 uint64_t span_get_size(span_bytes *span);
 enum span_type span_get_type(span_bytes *span);

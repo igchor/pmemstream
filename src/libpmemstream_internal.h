@@ -40,6 +40,8 @@ struct pmemstream {
 	pmem2_persist_fn persist;
 
 	struct region_contexts_map *region_contexts_map;
+
+	uint64_t txid_counter;
 };
 
 static inline uint8_t *pmemstream_offset_to_ptr(struct pmemstream *stream, uint64_t offset)

@@ -140,6 +140,47 @@ int pmemstream_get_region_context(struct pmemstream *stream, struct pmemstream_r
 	return region_contexts_map_get_or_create(stream->region_contexts_map, region, region_context);
 }
 
+int pmemstream_persist(struct pmemstream *stream, struct pmemstream_region region, struct pmemstream_entry entry)
+{
+	// XXX: pass txid instead of persisted_offset
+	// XXX: for txid we would have to check all regions? 
+	struct span_runtime region_srt = span_get_entry_runtime(stream, region.offset);
+	uint64_t persisted_offset = pmemstream_region_get_persisted_offset(stream, region);
+
+	if (persisted_offset >= entry.offset) {
+		return 0;
+	}
+	
+	struct pmemstream_entry_iterator entry_it;
+	int ret = entry_iterator_initialize(&entry_it, stream, region);
+	if (ret) {
+		return ret;
+	}
+
+	// XXX: entry_iterator_from_offset
+	entry_it.offset = persisted_offset;
+
+	struct pmemstream_entry e;
+	// XXX: next() version which does not perform validation (or accepts validation as cb?)
+	while (pmemstream_entry_iterator_next(&entry_it, NULL, &e) == 0) {
+		struct span_runtime entry_srt = span_get_entry_runtime(stream, e.offset);
+
+		assert(entry_srt.entry.txid & TXID_INVALID_BIT != 0);
+		struct tx_context *txc = (struct tx_context *)(entry_srt.entry.txid & TXID_EXTRA_MASK);
+
+		while(__atomic_load_n(&txc->txid, __ATOMIC_ACQUIRE) == TXID_INVALID_BIT) {
+			// XXX: wait or check rest of entries?
+		}
+
+		/* Now, the tx is commited */
+		span_update_entry(stream, e.offset, NO_UPDATE, txc->txid);
+	}
+
+	stream->persist(pmemstream_offset_to_ptr(stream, persisted_offset), e.offset - persisted_offset);
+	
+	pmemstream_region_set_persisted_offset(stream, e.offset);
+}
+
 // synchronously appends data buffer to the end of the region
 int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region,
 		      struct pmemstream_region_context *region_context, const void *data, size_t size,
@@ -179,7 +220,14 @@ int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region
 		new_entry->offset = offset;
 	}
 
-	span_create_entry(stream, offset, data, size, util_popcount_memory(data, size));
+	// XXX: allocate this in tx_begin()
+	struct tx_context* tx_context = malloc(*tx_context);
+	tx_context->txid = TXID_INVALID_BIT;
+
+	span_create_entry(stream, offset, data, size, tx_context);
+
+	uint64_t txid = __atomic_fetch_add(&stream->txid_counter, 1, __ATOMIC_RELAXED);
+	__atomic_store_n(&tx->context->txid, txid, __ATOMIC_RELEASE);
 
 	return 0;
 }
