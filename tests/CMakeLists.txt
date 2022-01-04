@@ -105,6 +105,9 @@ if(TESTS_RAPIDCHECK)
 
 	build_test_ext(NAME concurrent_append_iterate SRC_FILES unittest/concurrent_append_iterate.cpp LIBS rapidcheck)
 	add_test_generic(NAME concurrent_append_iterate TRACERS none)
+	
+	build_test_ext(NAME offset_manager SRC_FILES unittest/offset_manager.cpp ../src/offset_manager.c LIBS rapidcheck)
+	add_test_generic(NAME offset_manager TRACERS none)
 endif()
 
 if(GDB AND DEBUG_BUILD)
