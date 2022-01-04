@@ -46,14 +46,15 @@ int main(int argc, char *argv[])
 
 			/* append an entry with size = 0 */
 			std::string entry;
-			auto ret =
-				pmemstream_append(stream.get(), region, nullptr, entry.data(), entry.size(), nullptr);
+			auto ret = pmemstream_append(stream.get(), region, nullptr, entry.data(), entry.size(), nullptr,
+						     nullptr);
 			UT_ASSERTeq(ret, 0);
 			verify(stream.get(), region, {entry}, {});
 
 			/* and try to append entry with size bigger than region's size */
 			entry = std::string(max_size + 1, 'W');
-			ret = pmemstream_append(stream.get(), region, nullptr, entry.data(), entry.size(), nullptr);
+			ret = pmemstream_append(stream.get(), region, nullptr, entry.data(), entry.size(), nullptr,
+						nullptr);
 			UT_ASSERTeq(ret, -1);
 
 			UT_ASSERTeq(pmemstream_region_free(stream.get(), region), 0);
@@ -69,19 +70,20 @@ int main(int argc, char *argv[])
 
 			struct pmemstream_entry ne = {0}, prev_ne = {0};
 			while (elems-- > 0) {
-				auto ret = pmemstream_append(stream.get(), region, nullptr, e.data(), e.size(), &ne);
+				auto ret = pmemstream_append(stream.get(), region, nullptr, e.data(), e.size(), &ne,
+							     nullptr);
 				RC_ASSERT(ret == 0);
 				RC_ASSERT(ne.offset > prev_ne.offset);
 				prev_ne = ne;
 			}
 			/* next append should not fit */
-			auto ret = pmemstream_append(stream.get(), region, nullptr, e.data(), e.size(), &ne);
+			auto ret = pmemstream_append(stream.get(), region, nullptr, e.data(), e.size(), &ne, nullptr);
 			RC_ASSERT(ne.offset == prev_ne.offset);
 			/* XXX: should be updated with the real error code, when available */
 			RC_ASSERT(ret == -1);
 			e.resize(4);
 			/* ... but smaller entry should fit just in */
-			ret = pmemstream_append(stream.get(), region, nullptr, e.data(), e.size(), &ne);
+			ret = pmemstream_append(stream.get(), region, nullptr, e.data(), e.size(), &ne, nullptr);
 			RC_ASSERT(ne.offset > prev_ne.offset);
 			RC_ASSERT(ret == 0);
 

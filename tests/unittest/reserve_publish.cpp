@@ -33,8 +33,8 @@ void reserve_and_publish(struct pmemstream *stream, struct pmemstream_region reg
 		memcpy(reserved_data, d.data(), d.size());
 
 		/* XXX: add tests as well for non-temporal memcpy and no persist */
-		ret = pmemstream_publish(stream, region, d.data(), d.size(), &reserved_entry);
-		RC_ASSERT(ret == 0);
+		ret = pmemstream_publish(stream, region, d.data(), d.size(), &reserved_entry, nullptr);
+		UT_ASSERTeq(ret, 0);
 	}
 }
 } /* namespace */
@@ -70,7 +70,7 @@ int main(int argc, char *argv[])
 				my_data.emplace_back(1024, 'Z');
 				const auto extra_entry = my_data.back();
 				int ret = pmemstream_append(stream.get(), region, nullptr, extra_entry.data(),
-							    extra_entry.size(), nullptr);
+							    extra_entry.size(), nullptr, nullptr);
 				RC_ASSERT(ret == 0);
 				verify(stream.get(), region, data, my_data);
 

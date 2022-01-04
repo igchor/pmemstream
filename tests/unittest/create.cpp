@@ -72,8 +72,8 @@ int main(int argc, char *argv[])
 
 			/* try to append non-zero entry and expect fail */
 			std::string entry("ASDF");
-			auto ret =
-				pmemstream_append(stream.get(), region, nullptr, entry.data(), entry.size(), nullptr);
+			auto ret = pmemstream_append(stream.get(), region, nullptr, entry.data(), entry.size(), nullptr,
+						     nullptr);
 			RC_ASSERT(ret != 0);
 
 			RC_ASSERT(pmemstream_region_free(stream.get(), region) == 0);

@@ -19,7 +19,7 @@ namespace
 void append(struct pmemstream *stream, struct pmemstream_region region, const std::vector<std::string> &data)
 {
 	for (const auto &e : data) {
-		auto ret = pmemstream_append(stream, region, nullptr, e.data(), e.size(), nullptr);
+		auto ret = pmemstream_append(stream, region, nullptr, e.data(), e.size(), nullptr, nullptr);
 		UT_ASSERTeq(ret, 0);
 	}
 }
@@ -106,7 +106,7 @@ static void test(int argc, char *argv[])
 		/* append (gdb script should tear the memcpy) */
 		/* add entry longer than 512 */
 		std::string buf(1500, '~');
-		pmemstream_append(s.get(), r, NULL, buf.data(), buf.size(), nullptr);
+		pmemstream_append(s.get(), r, NULL, buf.data(), buf.size(), nullptr, nullptr);
 		UT_ASSERT_UNREACHABLE;
 
 	} else if (argv[1][0] == 'i') {

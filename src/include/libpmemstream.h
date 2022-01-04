@@ -6,6 +6,7 @@
 #ifndef LIBPMEMSTREAM_H
 #define LIBPMEMSTREAM_H
 
+#include <libminiasync.h>
 #include <libpmem2.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -27,6 +28,18 @@ struct pmemstream_region {
 struct pmemstream_entry {
 	uint64_t offset;
 };
+
+// XXX: should this be in a header
+struct pmemstream_async_commit_data {
+	struct pmemstream *stream;
+	uint64_t target_offset;
+};
+
+struct pmemstream_async_commit_output {
+	uint64_t dummy;
+};
+
+FUTURE(pmemstream_commit_future, struct pmemstream_async_commit_data, struct pmemstream_async_commit_output);
 
 // manages lifecycle of the stream. Can be based on top of a raw pmem2_map
 // or a pmemset (TBD).
@@ -65,7 +78,7 @@ int pmemstream_reserve(struct pmemstream *stream, struct pmemstream_region regio
  * *data has to hold the same data as they were written by user (e.g. in custom memcpy).
  * size of the entry have to match the previous reservation and the actual size of the data written by user. */
 int pmemstream_publish(struct pmemstream *stream, struct pmemstream_region region, const void *data, size_t size,
-		       struct pmemstream_entry *reserved_entry);
+		       struct pmemstream_entry *reserved_entry, struct pmemstream_commit_future *commit_future);
 
 /* Synchronously appends data buffer after last valid entry in region.
  * Fails if no space is available.
@@ -81,7 +94,7 @@ int pmemstream_publish(struct pmemstream *stream, struct pmemstream_region regio
  */
 int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region,
 		      struct pmemstream_region_runtime *region_runtime, const void *data, size_t size,
-		      struct pmemstream_entry *new_entry);
+		      struct pmemstream_entry *new_entry, struct pmemstream_commit_future *commit_future);
 
 // returns pointer to the data of the entry
 void *pmemstream_entry_data(struct pmemstream *stream, struct pmemstream_entry entry);

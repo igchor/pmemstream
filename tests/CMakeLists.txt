@@ -93,6 +93,9 @@ if(TESTS_RAPIDCHECK)
 	build_test_rc(NAME create SRC_FILES unittest/create.cpp)
 	add_test_generic(NAME create TRACERS none)
 
+	build_test_rc(NAME mpmc_queue SRC_FILES unittest/mpmc_queue.cpp ../src/mpmc_queue.c)
+	add_test_generic(NAME mpmc_queue TRACERS none)
+
 	build_test_rc(NAME get_region_runtime SRC_FILES unittest/get_region_runtime.cpp)
 	add_test_generic(NAME get_region_runtime TRACERS none)
 

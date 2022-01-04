@@ -68,7 +68,7 @@ int main(int argc, char *argv[])
 		struct data_entry e;
 		e.data = last_entry_data + 1;
 		struct pmemstream_entry new_entry;
-		ret = pmemstream_append(stream, region, NULL, &e, sizeof(e), &new_entry);
+		ret = pmemstream_append(stream, region, NULL, &e, sizeof(e), &new_entry, NULL);
 		if (ret == -1) {
 			fprintf(stderr, "pmemstream_append failed\n");
 			return ret;
@@ -93,7 +93,7 @@ int main(int argc, char *argv[])
 		}
 		pmemstream_entry_iterator_delete(&eiter);
 
-		ret = pmemstream_append(stream, new_region, NULL, &e, sizeof(e), &new_entry);
+		ret = pmemstream_append(stream, new_region, NULL, &e, sizeof(e), &new_entry, NULL);
 		if (ret == -1) {
 			fprintf(stderr, "pmemstream_append failed\n");
 			return ret;
@@ -103,7 +103,7 @@ int main(int argc, char *argv[])
 		printf("new_data_entry: %lu\n", new_data_entry->data);
 
 		e.data++;
-		ret = pmemstream_append(stream, new_region, NULL, &e, sizeof(e), &new_entry);
+		ret = pmemstream_append(stream, new_region, NULL, &e, sizeof(e), &new_entry, NULL);
 		if (ret == -1) {
 			fprintf(stderr, "pmemstream_append failed\n");
 			return ret;

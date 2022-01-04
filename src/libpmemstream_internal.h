@@ -8,6 +8,7 @@
 
 #include "iterator.h"
 #include "libpmemstream.h"
+#include "mpmc_queue.h"
 #include "region.h"
 #include "span.h"
 
@@ -23,6 +24,8 @@ extern "C" {
 
 #define PMEMSTREAM_SIGNATURE ("PMEMSTREAM")
 #define PMEMSTREAM_SIGNATURE_SIZE (64)
+
+#define PMEMSTREAM_MAX_CONCURRENCY 64
 
 struct pmemstream_data {
 	struct pmemstream_header {
@@ -46,6 +49,15 @@ struct pmemstream {
 	pmem2_persist_fn persist;
 
 	struct region_runtimes_map *region_runtimes_map;
+
+	// XXX: make this per region (move to region_context)
+	struct mpmc_queue *mpmc_queue;
+
+	// XXX: turn it into a datastructure so that thread_ids can be reused
+	uint64_t thread_id_counter;
+	pthread_key_t thread_id;
+
+	pthread_mutex_t recover_region_lock; // XXX: per-region
 };
 
 static inline uint8_t *pmemstream_offset_to_ptr(struct pmemstream *stream, uint64_t offset)

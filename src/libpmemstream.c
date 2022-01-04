@@ -6,6 +6,8 @@
 #include "common/util.h"
 #include "libpmemstream_internal.h"
 
+#include <libminiasync.h>
+
 #include <assert.h>
 #include <errno.h>
 #include <stdatomic.h>
@@ -40,6 +42,11 @@ static void pmemstream_init(struct pmemstream *stream)
 		       PMEM2_F_MEM_NONTEMPORAL);
 }
 
+static void pmemstream_destroy_thread_id(void *arg)
+{
+	// TODO: recycle ID
+}
+
 int pmemstream_from_map(struct pmemstream **stream, size_t block_size, struct pmem2_map *map)
 {
 	if (block_size == 0) {
@@ -55,6 +62,7 @@ int pmemstream_from_map(struct pmemstream **stream, size_t block_size, struct pm
 	s->stream_size = pmem2_map_get_size(map);
 	s->usable_size = ALIGN_DOWN(s->stream_size - sizeof(struct pmemstream_data), block_size);
 	s->block_size = block_size;
+	s->thread_id_counter = 0;
 
 	s->memcpy = pmem2_get_memcpy_fn(map);
 	s->memset = pmem2_get_memset_fn(map);
@@ -68,13 +76,34 @@ int pmemstream_from_map(struct pmemstream **stream, size_t block_size, struct pm
 
 	s->region_runtimes_map = region_runtimes_map_new();
 	if (!s->region_runtimes_map) {
-		goto err;
+		goto err_contexts_map;
+	}
+
+	s->mpmc_queue = mpmc_queue_new(PMEMSTREAM_MAX_CONCURRENCY);
+	if (!s->mpmc_queue) {
+		goto err_mpmc_queue;
+	}
+
+	int ret = pthread_key_create(&s->thread_id, pmemstream_destroy_thread_id);
+	if (ret) {
+		goto err_pthread_key_create;
+	}
+
+	ret = pthread_mutex_init(&s->recover_region_lock, NULL);
+	if (ret) {
+		goto err_recover_region_lock;
 	}
 
 	*stream = s;
 	return 0;
 
-err:
+err_recover_region_lock:
+	pthread_key_delete(s->thread_id);
+err_pthread_key_create:
+	mpmc_queue_destroy(s->mpmc_queue);
+err_mpmc_queue:
+	region_runtimes_map_destroy(s->region_runtimes_map);
+err_contexts_map:
 	free(s);
 	return -1;
 }
@@ -83,6 +112,9 @@ void pmemstream_delete(struct pmemstream **stream)
 {
 	struct pmemstream *s = *stream;
 	region_runtimes_map_destroy(s->region_runtimes_map);
+	mpmc_queue_destroy(s->mpmc_queue);
+	pthread_key_delete(s->thread_id);
+	pthread_mutex_destroy(&s->recover_region_lock);
 	free(s);
 	*stream = NULL;
 }
@@ -160,6 +192,22 @@ static void pmemstream_clear_region_remaining(struct pmemstream *stream, struct 
 	span_create_empty(stream, tail, remaining_size - SPAN_EMPTY_METADATA_SIZE);
 }
 
+static uint64_t pmemstream_thread_id(struct pmemstream *stream)
+{
+	uint64_t thread_id = (uint64_t)pthread_getspecific(stream->thread_id);
+	if (thread_id == 0) {
+		thread_id = __atomic_fetch_add(&stream->thread_id_counter, 1, __ATOMIC_RELAXED);
+		// XXX - return error instead
+		assert(thread_id < PMEMSTREAM_MAX_CONCURRENCY);
+
+		/* Always store real thread_id + 1 to not collide with NULL. */
+		thread_id++;
+		pthread_setspecific(stream->thread_id, (const void *)thread_id);
+	}
+
+	return thread_id - 1;
+}
+
 int pmemstream_reserve(struct pmemstream *stream, struct pmemstream_region region,
 		       struct pmemstream_region_runtime *region_runtime, size_t size,
 		       struct pmemstream_entry *reserved_entry, void **data_addr)
@@ -183,46 +231,105 @@ int pmemstream_reserve(struct pmemstream *stream, struct pmemstream_region regio
 
 	uint64_t offset = __atomic_load_n(&region_runtime->append_offset, __ATOMIC_RELAXED);
 	if (offset & PMEMSTREAM_OFFSET_DIRTY_BIT) {
-		offset &= PMEMSTREAM_OFFSET_DIRTY_MASK;
-		pmemstream_clear_region_remaining(stream, region, offset);
-		__atomic_store_n(&region_runtime->append_offset, offset, __ATOMIC_RELEASE);
+		pthread_mutex_lock(&stream->recover_region_lock);
+
+		if (offset == __atomic_load_n(&region_runtime->append_offset, __ATOMIC_RELAXED)) {
+			offset &= PMEMSTREAM_OFFSET_MASK;
+			pmemstream_clear_region_remaining(stream, region, offset);
+			__atomic_store_n(&region_runtime->append_offset, offset, __ATOMIC_RELEASE);
+
+			mpmc_queue_reset(stream->mpmc_queue, offset);
+		}
+
+		pthread_mutex_unlock(&stream->recover_region_lock);
 	}
+
+	uint64_t append_offset =
+		mpmc_queue_acquire(stream->mpmc_queue, pmemstream_thread_id(stream), entry_total_size_span_aligned);
 
 	if (offset + entry_total_size_span_aligned > region.offset + region_srt.total_size) {
 		return -1;
 	}
 	/* offset outside of region */
-	if (offset < region_srt.data_offset) {
+	if (append_offset < region_srt.data_offset) {
 		return -1;
 	}
 
-	region_runtime->append_offset += entry_total_size_span_aligned;
-
-	reserved_entry->offset = offset;
+	reserved_entry->offset = append_offset;
 	/* data is right after the entry metadata */
-	*data_addr = span_offset_to_span_ptr(stream, offset + SPAN_ENTRY_METADATA_SIZE);
+	*data_addr = span_offset_to_span_ptr(stream, append_offset + SPAN_ENTRY_METADATA_SIZE);
 
 	return ret;
 }
 
+/* Try to consume offset from mpmc_queue - returns 0 if consumed offset + size is >= target_offset,
+ * -1 otherwise. */
+static int pmemstream_poll_prev_appends(struct pmemstream *stream, uint64_t target_offset)
+{
+	uint64_t ready_offset;
+	uint64_t size = mpmc_queue_consume(stream->mpmc_queue, &ready_offset);
+
+	if (ready_offset + size >= target_offset) {
+		return 0;
+	}
+
+	return -1;
+}
+
+static enum future_state pmemstream_async_commit_impl(struct future_context *ctx, struct future_notifier *notifier)
+{
+	struct pmemstream_async_commit_data *data = future_context_get_data(ctx);
+	if (pmemstream_poll_prev_appends(data->stream, data->target_offset) == 0) {
+		return FUTURE_STATE_COMPLETE;
+	}
+
+	return FUTURE_STATE_RUNNING; // XXX: should it be idle?
+}
+
+static struct pmemstream_commit_future pmemstream_async_commit(struct pmemstream *stream, uint64_t target_offset)
+{
+	struct pmemstream_commit_future future;
+	future.data.stream = stream;
+	future.data.target_offset = target_offset;
+
+	FUTURE_INIT(&future, pmemstream_async_commit_impl);
+
+	return future;
+}
+
 static int pmemstream_internal_publish(struct pmemstream *stream, struct pmemstream_region region, const void *data,
-				       size_t size, struct pmemstream_entry *reserved_entry, int flags)
+				       size_t size, struct pmemstream_entry *reserved_entry, int flags,
+				       struct pmemstream_commit_future *commit_future)
 {
 	span_create_entry(stream, reserved_entry->offset, data, size, util_popcount_memory(data, size), flags);
+
+	mpmc_queue_produce(stream->mpmc_queue, pmemstream_thread_id(stream));
+
+	struct span_runtime entry_rt = span_get_entry_runtime(stream, reserved_entry->offset);
+	uint64_t target_offset = reserved_entry->offset + entry_rt.entry.size;
+
+	struct pmemstream_commit_future future = pmemstream_async_commit(stream, target_offset);
+	if (commit_future) {
+		*commit_future = future;
+	} else {
+		/* If user have not provided ptr to future, we will wait for completion. */
+		FUTURE_BUSY_POLL(&future);
+	}
 
 	return 0;
 }
 
 int pmemstream_publish(struct pmemstream *stream, struct pmemstream_region region, const void *data, size_t size,
-		       struct pmemstream_entry *reserved_entry)
+		       struct pmemstream_entry *reserved_entry, struct pmemstream_commit_future *commit_future)
 {
-	return pmemstream_internal_publish(stream, region, data, size, reserved_entry, PMEMSTREAM_PUBLISH_PERSIST);
+	return pmemstream_internal_publish(stream, region, data, size, reserved_entry, PMEMSTREAM_PUBLISH_PERSIST,
+					   commit_future);
 }
 
 // synchronously appends data buffer to the end of the region
 int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region,
 		      struct pmemstream_region_runtime *region_runtime, const void *data, size_t size,
-		      struct pmemstream_entry *new_entry)
+		      struct pmemstream_entry *new_entry, struct pmemstream_commit_future *commit_future)
 {
 	struct pmemstream_entry reserved_entry;
 	void *reserved_dest;
@@ -232,7 +339,8 @@ int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region
 	}
 
 	stream->memcpy(reserved_dest, data, size, PMEM2_F_MEM_NONTEMPORAL | PMEM2_F_MEM_NODRAIN);
-	ret = pmemstream_internal_publish(stream, region, data, size, &reserved_entry, PMEMSTREAM_PUBLISH_NOFLUSH_DATA);
+	ret = pmemstream_internal_publish(stream, region, data, size, &reserved_entry, PMEMSTREAM_PUBLISH_NOFLUSH_DATA,
+					  commit_future);
 	if (ret) {
 		return ret;
 	}
