@@ -35,8 +35,8 @@ enum span_type { SPAN_EMPTY = 00ULL << 62, SPAN_REGION = 11ULL << 62, SPAN_ENTRY
 #define SPAN_TYPE_MASK (11ULL << 62)
 #define SPAN_EXTRA_MASK (~SPAN_TYPE_MASK)
 
-#define TXID_INVALID_BIT (1ULL << 63)
-#define TXID_EXTRA_MASK (~TXID_INVALID_BIT)
+#define TXID_INVALID (1ULL << 63)
+#define TXID_EXTRA_MASK (~TXID_INVALID)
 
 struct span_runtime {
 	enum span_type type;

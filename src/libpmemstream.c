@@ -165,10 +165,10 @@ int pmemstream_persist(struct pmemstream *stream, struct pmemstream_region regio
 	while (pmemstream_entry_iterator_next(&entry_it, NULL, &e) == 0) {
 		struct span_runtime entry_srt = span_get_entry_runtime(stream, e.offset);
 
-		assert(entry_srt.entry.txid & TXID_INVALID_BIT != 0);
+		assert(entry_srt.entry.txid & TXID_INVALID != 0);
 		struct tx_context *txc = (struct tx_context *)(entry_srt.entry.txid & TXID_EXTRA_MASK);
 
-		while(__atomic_load_n(&txc->txid, __ATOMIC_ACQUIRE) == TXID_INVALID_BIT) {
+		while(__atomic_load_n(&txc->txid, __ATOMIC_ACQUIRE) == TXID_INVALID) {
 			// XXX: wait or check rest of entries?
 		}
 
@@ -220,14 +220,12 @@ int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region
 		new_entry->offset = offset;
 	}
 
-	// XXX: allocate this in tx_begin()
-	struct tx_context* tx_context = malloc(*tx_context);
-	tx_context->txid = TXID_INVALID_BIT;
-
-	span_create_entry(stream, offset, data, size, tx_context);
+	span_create_entry(stream, offset, data, size, TXID_INVALID);
 
 	uint64_t txid = __atomic_fetch_add(&stream->txid_counter, 1, __ATOMIC_RELAXED);
-	__atomic_store_n(&tx->context->txid, txid, __ATOMIC_RELEASE);
+	// XXX - RACE, some othe tx can fetch_add txid and set it's entry before we do
+	span_update_entry(stream, offset, txid);
 
-	return 0;
+	// XXX: fix this, return through some parameter or change return type
+	return (int)txid;
 }

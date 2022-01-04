@@ -24,18 +24,22 @@ void span_create_empty(struct pmemstream *stream, uint64_t offset, size_t data_s
 	stream->persist(span, SPAN_EMPTY_METADATA_SIZE);
 }
 
-void span_create_entry(struct pmemstream *stream, uint64_t offset, const void *data, size_t data_size, void *context);
+void span_create_entry(struct pmemstream *stream, uint64_t offset, const void *data, size_t data_size, uint64_t txid);
 {
 	span_bytes *span = span_offset_to_span_ptr(stream, offset);
 	assert((data_size & SPAN_TYPE_MASK) == 0);
-	assert((context & TXID_INVALID_BIT) == 0);
+	assert((context & TXID_INVALID) == 0);
 	span[0] = data_size | SPAN_ENTRY;
+	span[1] = txid; // XXX: should it be atomic operation?
 
 	void *dest = ((uint8_t *)span) + SPAN_ENTRY_METADATA_SIZE;
 	stream->memcpy(dest, data, data_size, PMEM2_F_MEM_NOFLUSH);
+}
 
-	// XXX: does it have to be __ATOMIC_RELEASE?
-	__atomic_store_n(span + 1, ((uint64_t)context) | TXID_INVALID_BIT, __ATOMIC_RELEASE);
+void span_update_entry(struct pmemstream *stream, uint64_t offset, uint64_t txid)
+{
+	span_bytes *span = span_offset_to_span_ptr(stream, offset);
+	__atomic_store_n(span + 1, txid, __ATOMIC_RELEASE);
 }
 
 void span_create_region(struct pmemstream *stream, uint64_t offset, size_t size)

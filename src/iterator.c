@@ -96,12 +96,12 @@ err:
 // XXX: add parameter to tell if we're insterested in persisted or just commited
 static int validate_txid(uint64_t txid)
 {
-	if (txid & TXID_INVALID_BIT == 0) {
+	if (txid & TXID_INVALID == 0) {
 		// XXX compare against user_provided txid?
 		return 0;
 	}
 	struct tx_context *txc = (struct tx_context*)(txid & TXID_EXTRA_MASK);
-	if (txc->txid != TXID_INVALID_BIT) {
+	if (txc->txid != TXID_INVALID) {
 		return 0;
 	}
 	return -1;
