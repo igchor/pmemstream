@@ -6,6 +6,8 @@
 #include "common/util.h"
 #include "libpmemstream_internal.h"
 
+#include <libminiasync.h>
+
 #include <assert.h>
 #include <errno.h>
 #include <stdatomic.h>
@@ -171,15 +173,18 @@ static void pmemstream_clear_region_remaining(struct pmemstream *stream, struct 
 
 static uint64_t pmemstream_thread_id(struct pmemstream *stream)
 {
-	uint64_t thread_id = (uint64_t) pthread_getspecific(stream->thread_id);
+	uint64_t thread_id = (uint64_t)pthread_getspecific(stream->thread_id);
 	if (thread_id == NULL) {
 		thread_id = __atomic_fetch_add(&stream->thread_id_counter, 1, __ATOMIC_RELAXED);
 		// XXX - return error instead
 		assert(thread_id < PMEMSTREAM_MAX_CONCURRENCY);
-		pthread_setspecific(stream->thread_id, (const void*)thread_id);
+
+		/* Always store real thread_id + 1 to not collide with NULL. */
+		thread_id++;
+		pthread_setspecific(stream->thread_id, (const void *)thread_id);
 	}
 
-	return thread_id;
+	return thread_id - 1;
 }
 
 int pmemstream_reserve(struct pmemstream *stream, struct pmemstream_region region,
@@ -205,20 +210,21 @@ int pmemstream_reserve(struct pmemstream *stream, struct pmemstream_region regio
 
 	uint64_t offset = __atomic_load_n(&region_context->append_offset, __ATOMIC_RELAXED);
 	if (offset & PMEMSTREAM_OFFSET_DIRTY_BIT) {
-		pthread_mutex_lock(&stream->region_lock);
+		pthread_mutex_lock(&stream->region_contexts_map->region_lock);
 
 		if (offset == __atomic_load_n(&region_context->append_offset, __ATOMIC_RELAXED)) {
-			offset &= PMEMSTREAM_OFFSET_DIRTY_MASK;
+			offset &= PMEMSTREAM_OFFSET_MASK;
 			pmemstream_clear_region_remaining(stream, region, offset);
 			__atomic_store_n(&region_context->append_offset, offset, __ATOMIC_RELEASE);
 
-			offset_manager_reset(offset);
+			offset_manager_reset(stream->offset_manager, offset);
 		}
 
-		pthread_mutex_unlock(&stream->region_lock);
+		pthread_mutex_unlock(&stream->region_contexts_map->region_lock);
 	}
 
-	uint64_t append_offset = offset_manager_acquire(stream->offset_manager, pmemstream_thread_id(stream), entry_total_size_span_aligned);
+	uint64_t append_offset = offset_manager_acquire(stream->offset_manager, pmemstream_thread_id(stream),
+							entry_total_size_span_aligned);
 
 	/* XXX: should we revert to offset if there is no space? */
 	if (append_offset + entry_total_size_span_aligned > region.offset + region_srt.total_size) {
@@ -236,6 +242,8 @@ int pmemstream_reserve(struct pmemstream *stream, struct pmemstream_region regio
 	return ret;
 }
 
+/* Try to consume offset from offset_manager - returns 0 if consumed offset + size is >= target_offset,
+ * -1 otherwise. */
 static int pmemstream_poll_prev_appends(struct pmemstream *stream, uint64_t target_offset)
 {
 	uint64_t ready_offset;
@@ -248,38 +256,60 @@ static int pmemstream_poll_prev_appends(struct pmemstream *stream, uint64_t targ
 	return -1;
 }
 
+static enum future_state pmemstream_async_commit_impl(struct future_context *ctx, struct future_notifier *notifier)
+{
+	struct pmemstream_async_commit_data *data = future_context_get_data(ctx);
+	if (pmemstream_poll_prev_appends(data->stream, data->target_offset) == 0) {
+		return FUTURE_STATE_COMPLETE;
+	}
+
+	return FUTURE_STATE_RUNNING; // XXX: should it be idle?
+}
+
+static struct pmemstream_commit_future pmemstream_async_commit(struct pmemstream *stream, uint64_t target_offset)
+{
+	struct pmemstream_commit_future future;
+	future.data.stream = stream;
+	future.data.target_offset = target_offset;
+
+	FUTURE_INIT(&future, pmemstream_async_commit_impl);
+
+	return future;
+}
+
 static int pmemstream_internal_publish(struct pmemstream *stream, struct pmemstream_region region, const void *data,
-				       size_t size, struct pmemstream_entry *reserved_entry, int flags)
+				       size_t size, struct pmemstream_entry *reserved_entry, int flags,
+				       struct pmemstream_commit_future *commit_future)
 {
 	span_create_entry(stream, reserved_entry->offset, data, size, util_popcount_memory(data, size), flags);
 
 	offset_manager_produce(stream->offset_manager, pmemstream_thread_id(stream));
 
+	struct span_runtime entry_rt = span_get_entry_runtime(stream, reserved_entry->offset);
+	uint64_t target_offset = reserved_entry->offset + entry_rt.entry.size;
+
+	struct pmemstream_commit_future future = pmemstream_async_commit(stream, target_offset);
+	if (commit_future) {
+		*commit_future = future;
+	} else {
+		/* If user have not provided ptr to future, we will wait for completion. */
+		FUTURE_BUSY_POLL(&future);
+	}
+
 	return 0;
 }
 
 int pmemstream_publish(struct pmemstream *stream, struct pmemstream_region region, const void *data, size_t size,
-		       struct pmemstream_entry *reserved_entry)
+		       struct pmemstream_entry *reserved_entry, struct pmemstream_commit_future *commit_future)
 {
-	int ret = pmemstream_internal_publish(stream, region, data, size, reserved_entry, PMEMSTREAM_PUBLISH_PERSIST);
-	if (ret) {
-		return ret;
-	}
-
-	struct span_runtime entry_rt = span_get_entry_runtime(stream, reserved_entry->offset);
-	uint64_t target_offset = reserved_entry->offset + entry_rt.entry.size;
-
-	while (pmemstream_poll_prev_appends(stream, target_offset) == -1) {
-		/* SPIN */
-	}
-
-	return 0;
+	return pmemstream_internal_publish(stream, region, data, size, reserved_entry, PMEMSTREAM_PUBLISH_PERSIST,
+					   commit_future);
 }
 
 // synchronously appends data buffer to the end of the region
 int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region,
 		      struct pmemstream_region_context *region_context, const void *data, size_t size,
-		      struct pmemstream_entry *new_entry)
+		      struct pmemstream_entry *new_entry, struct pmemstream_commit_future *commit_future)
 {
 	struct pmemstream_entry reserved_entry;
 	void *reserved_dest;
@@ -289,7 +319,8 @@ int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region
 	}
 
 	stream->memcpy(reserved_dest, data, size, PMEM2_F_MEM_NONTEMPORAL);
-	ret = pmemstream_internal_publish(stream, region, data, size, &reserved_entry, PMEMSTREAM_PUBLISH_NOFLUSH_DATA);
+	ret = pmemstream_internal_publish(stream, region, data, size, &reserved_entry, PMEMSTREAM_PUBLISH_NOFLUSH_DATA,
+					  commit_future);
 	if (ret) {
 		return ret;
 	}

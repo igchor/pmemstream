@@ -8,9 +8,9 @@
 
 #include "iterator.h"
 #include "libpmemstream.h"
+#include "offset_manager.h"
 #include "region.h"
 #include "span.h"
-#include "offset_manager.h"
 
 #ifdef __cplusplus
 extern "C" {

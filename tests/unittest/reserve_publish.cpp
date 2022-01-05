@@ -26,7 +26,7 @@ void append(struct pmemstream *stream, struct pmemstream_region region,
 	    struct pmemstream_region_context *region_context, const std::vector<std::string> &data)
 {
 	for (const auto &e : data) {
-		auto ret = pmemstream_append(stream, region, region_context, e.data(), e.size(), nullptr);
+		auto ret = pmemstream_append(stream, region, region_context, e.data(), e.size(), nullptr, nullptr);
 		UT_ASSERTeq(ret, 0);
 	}
 }
@@ -47,7 +47,7 @@ void reserve_and_publish(struct pmemstream *stream, struct pmemstream_region reg
 		memcpy(reserved_data, d.data(), d.size());
 
 		/* XXX: add tests as well for non-temporal memcpy and no persist */
-		ret = pmemstream_publish(stream, region, d.data(), d.size(), &reserved_entry);
+		ret = pmemstream_publish(stream, region, d.data(), d.size(), &reserved_entry, nullptr);
 		UT_ASSERTeq(ret, 0);
 	}
 }
@@ -119,7 +119,8 @@ static void test(int argc, char *argv[])
 
 		/* add one more "regular" append */
 		std::string extra_entry(1024, 'Z');
-		int ret = pmemstream_append(s.get(), r, nullptr, extra_entry.data(), extra_entry.size(), nullptr);
+		int ret = pmemstream_append(s.get(), r, nullptr, extra_entry.data(), extra_entry.size(), nullptr,
+					    nullptr);
 		UT_ASSERTeq(ret, 0);
 
 		/* verify count of all appended/written entries */

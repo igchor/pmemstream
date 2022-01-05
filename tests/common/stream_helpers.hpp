@@ -13,7 +13,7 @@ void append(struct pmemstream *stream, struct pmemstream_region region,
 	    struct pmemstream_region_context *region_context, const std::vector<std::string> &data)
 {
 	for (const auto &e : data) {
-		auto ret = pmemstream_append(stream, region, region_context, e.data(), e.size(), nullptr);
+		auto ret = pmemstream_append(stream, region, region_context, e.data(), e.size(), nullptr, nullptr);
 		RC_ASSERT(ret == 0);
 	}
 }

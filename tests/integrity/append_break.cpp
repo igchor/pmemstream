@@ -109,7 +109,7 @@ static void test(int argc, char *argv[])
 		/* append (gdb script should tear the memcpy) */
 		/* add entry longer than 512 */
 		std::string buf(1500, '~');
-		pmemstream_append(s.get(), r, NULL, buf.data(), buf.size(), nullptr);
+		pmemstream_append(s.get(), r, NULL, buf.data(), buf.size(), nullptr, nullptr);
 		ASSERT_UNREACHABLE;
 
 	} else if (argv[1][0] == 'i') {

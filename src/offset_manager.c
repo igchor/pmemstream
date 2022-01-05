@@ -20,7 +20,7 @@ struct offset_manager *offset_manager_new(size_t num_producers)
 	}
 
 	manager->num_producers = num_producers;
-	offset_manager_reset(0);
+	offset_manager_reset(manager, 0);
 
 	return manager;
 }
