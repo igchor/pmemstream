@@ -60,13 +60,20 @@ int pmemstream_from_map(struct pmemstream **stream, size_t block_size, struct pm
 
 	s->region_contexts_map = region_contexts_map_new();
 	if (!s->region_contexts_map) {
-		goto err;
+		goto err_contexts_map;
+	}
+
+	s->offset_manager = offset_manager_new();
+	if (!s->offset_manager) {
+		goto err_offset_manager;
 	}
 
 	*stream = s;
 	return 0;
 
-err:
+err_offset_manager:
+	region_contexts_map_destroy(s->region_contexts_map);
+err_contexts_map:
 	free(s);
 	return -1;
 }
@@ -75,6 +82,7 @@ void pmemstream_delete(struct pmemstream **stream)
 {
 	struct pmemstream *s = *stream;
 	region_contexts_map_destroy(s->region_contexts_map);
+	offset_manager_destroy(s->offset_manager);
 	free(s);
 	*stream = NULL;
 }

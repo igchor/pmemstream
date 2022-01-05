@@ -10,6 +10,7 @@
 #include "libpmemstream.h"
 #include "region.h"
 #include "span.h"
+#include "offset_manager.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -46,6 +47,9 @@ struct pmemstream {
 	pmem2_persist_fn persist;
 
 	struct region_contexts_map *region_contexts_map;
+
+	// XXX: make this per region (move to region_context)
+	struct offset_manager *offset_manager;
 };
 
 static inline uint8_t *pmemstream_offset_to_ptr(struct pmemstream *stream, uint64_t offset)

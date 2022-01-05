@@ -20,12 +20,7 @@ struct offset_manager *offset_manager_new(size_t num_producers)
 	}
 
 	manager->num_producers = num_producers;
-	manager->produce_offset = 0;
-	manager->consume_offset = 0;
-
-	for (unsigned i = 0; i < num_producers; i++) {
-		manager->producers[i].granted_offset = OFFSET_MANAGER_OFFSET_MAX;
-	}
+	offset_manager_reset(0);
 
 	return manager;
 }
@@ -89,4 +84,14 @@ uint64_t offset_manager_consume(struct offset_manager *manager, size_t *ready_of
 
 	*ready_offset = consume_offset;
 	return 0;
+}
+
+void offset_manager_reset(struct offset_manager *manager, uint64_t offset)
+{
+	manager->produce_offset = offset;
+	manager->consume_offset = offset;
+
+	for (unsigned i = 0; i < manager->num_producers; i++) {
+		manager->producers[i].granted_offset = OFFSET_MANAGER_OFFSET_MAX;
+	}
 }
