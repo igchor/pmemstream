@@ -40,6 +40,11 @@ static void pmemstream_init(struct pmemstream *stream)
 		       PMEM2_F_MEM_NONTEMPORAL);
 }
 
+static void pmemstream_destroy_thread_id(void *arg)
+{
+	// TODO: recycle ID
+}
+
 int pmemstream_from_map(struct pmemstream **stream, size_t block_size, struct pmem2_map *map)
 {
 	struct pmemstream *s = malloc(sizeof(struct pmemstream));
@@ -47,6 +52,7 @@ int pmemstream_from_map(struct pmemstream **stream, size_t block_size, struct pm
 	s->stream_size = pmem2_map_get_size(map);
 	s->usable_size = ALIGN_DOWN(s->stream_size - sizeof(struct pmemstream_data), block_size);
 	s->block_size = block_size;
+	s->thread_id_counter = 0;
 
 	s->memcpy = pmem2_get_memcpy_fn(map);
 	s->memset = pmem2_get_memset_fn(map);
@@ -63,14 +69,21 @@ int pmemstream_from_map(struct pmemstream **stream, size_t block_size, struct pm
 		goto err_contexts_map;
 	}
 
-	s->offset_manager = offset_manager_new();
+	s->offset_manager = offset_manager_new(PMEMSTREAM_MAX_CONCURRENCY);
 	if (!s->offset_manager) {
 		goto err_offset_manager;
+	}
+
+	int ret = pthread_key_create(&s->thread_id, pmemstream_destroy_thread_id);
+	if (ret) {
+		goto err_pthread_key_create;
 	}
 
 	*stream = s;
 	return 0;
 
+err_pthread_key_create:
+	offset_manager_destroy(s->offset_manager);
 err_offset_manager:
 	region_contexts_map_destroy(s->region_contexts_map);
 err_contexts_map:
@@ -156,6 +169,19 @@ static void pmemstream_clear_region_remaining(struct pmemstream *stream, struct 
 	span_create_empty(stream, tail, remaining_size - SPAN_EMPTY_METADATA_SIZE);
 }
 
+static uint64_t pmemstream_thread_id(struct pmemstream *stream)
+{
+	uint64_t thread_id = (uint64_t) pthread_getspecific(stream->thread_id);
+	if (thread_id == NULL) {
+		thread_id = __atomic_fetch_add(&stream->thread_id_counter, 1, __ATOMIC_RELAXED);
+		// XXX - return error instead
+		assert(thread_id < PMEMSTREAM_MAX_CONCURRENCY);
+		pthread_setspecific(stream->thread_id, (const void*)thread_id);
+	}
+
+	return thread_id;
+}
+
 int pmemstream_reserve(struct pmemstream *stream, struct pmemstream_region region,
 		       struct pmemstream_region_context *region_context, size_t size,
 		       struct pmemstream_entry *reserved_entry, void **data_addr)
@@ -179,26 +205,47 @@ int pmemstream_reserve(struct pmemstream *stream, struct pmemstream_region regio
 
 	uint64_t offset = __atomic_load_n(&region_context->append_offset, __ATOMIC_RELAXED);
 	if (offset & PMEMSTREAM_OFFSET_DIRTY_BIT) {
-		offset &= PMEMSTREAM_OFFSET_DIRTY_MASK;
-		pmemstream_clear_region_remaining(stream, region, offset);
-		__atomic_store_n(&region_context->append_offset, offset, __ATOMIC_RELEASE);
+		pthread_mutex_lock(&stream->region_lock);
+
+		if (offset == __atomic_load_n(&region_context->append_offset, __ATOMIC_RELAXED)) {
+			offset &= PMEMSTREAM_OFFSET_DIRTY_MASK;
+			pmemstream_clear_region_remaining(stream, region, offset);
+			__atomic_store_n(&region_context->append_offset, offset, __ATOMIC_RELEASE);
+
+			offset_manager_reset(offset);
+		}
+
+		pthread_mutex_unlock(&stream->region_lock);
 	}
 
-	if (offset + entry_total_size_span_aligned > region.offset + region_srt.total_size) {
+	uint64_t append_offset = offset_manager_acquire(stream->offset_manager, pmemstream_thread_id(stream), entry_total_size_span_aligned);
+
+	/* XXX: should we revert to offset if there is no space? */
+	if (append_offset + entry_total_size_span_aligned > region.offset + region_srt.total_size) {
 		return -1;
 	}
 	/* offset outside of region */
-	if (offset < region_srt.data_offset) {
+	if (append_offset < region_srt.data_offset) {
 		return -1;
 	}
 
-	region_context->append_offset += entry_total_size_span_aligned;
-
-	reserved_entry->offset = offset;
+	reserved_entry->offset = append_offset;
 	/* data is right after the entry metadata */
-	*data_addr = span_offset_to_span_ptr(stream, offset + SPAN_ENTRY_METADATA_SIZE);
+	*data_addr = span_offset_to_span_ptr(stream, append_offset + SPAN_ENTRY_METADATA_SIZE);
 
 	return ret;
+}
+
+static int pmemstream_poll_prev_appends(struct pmemstream *stream, uint64_t target_offset)
+{
+	uint64_t ready_offset;
+	uint64_t size = offset_manager_consume(stream->offset_manager, &ready_offset);
+
+	if (ready_offset + size >= target_offset) {
+		return 0;
+	}
+
+	return -1;
 }
 
 static int pmemstream_internal_publish(struct pmemstream *stream, struct pmemstream_region region, const void *data,
@@ -206,13 +253,27 @@ static int pmemstream_internal_publish(struct pmemstream *stream, struct pmemstr
 {
 	span_create_entry(stream, reserved_entry->offset, data, size, util_popcount_memory(data, size), flags);
 
+	offset_manager_produce(stream->offset_manager, pmemstream_thread_id(stream));
+
 	return 0;
 }
 
 int pmemstream_publish(struct pmemstream *stream, struct pmemstream_region region, const void *data, size_t size,
 		       struct pmemstream_entry *reserved_entry)
 {
-	return pmemstream_internal_publish(stream, region, data, size, reserved_entry, PMEMSTREAM_PUBLISH_PERSIST);
+	int ret = pmemstream_internal_publish(stream, region, data, size, reserved_entry, PMEMSTREAM_PUBLISH_PERSIST);
+	if (ret) {
+		return ret;
+	}
+
+	struct span_runtime entry_rt = span_get_entry_runtime(stream, reserved_entry->offset);
+	uint64_t target_offset = reserved_entry->offset + entry_rt.entry.size;
+
+	while (pmemstream_poll_prev_appends(stream, target_offset) == -1) {
+		/* SPIN */
+	}
+
+	return 0;
 }
 
 // synchronously appends data buffer to the end of the region

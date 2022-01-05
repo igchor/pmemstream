@@ -41,7 +41,7 @@ void offset_manager_produce(struct offset_manager *manager, uint64_t producer_id
 
 uint64_t offset_manager_consume(struct offset_manager *manager, size_t *ready_offset);
 
-/* XXX: add reset()/rewind() function */
+void offset_manager_reset(struct offset_manager *manager, uint64_t offset);
 
 #ifdef __cplusplus
 } /* end extern "C" */

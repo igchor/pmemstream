@@ -25,6 +25,8 @@ extern "C" {
 #define PMEMSTREAM_SIGNATURE ("PMEMSTREAM")
 #define PMEMSTREAM_SIGNATURE_SIZE (64)
 
+#define PMEMSTREAM_MAX_CONCURRENCY 64
+
 struct pmemstream_data {
 	struct pmemstream_header {
 		char signature[PMEMSTREAM_SIGNATURE_SIZE];
@@ -50,6 +52,10 @@ struct pmemstream {
 
 	// XXX: make this per region (move to region_context)
 	struct offset_manager *offset_manager;
+
+	// XXX: turn it into a datastructure so that thread_ids can be reused
+	uint64_t thread_id_counter;
+	pthread_key_t thread_id;
 };
 
 static inline uint8_t *pmemstream_offset_to_ptr(struct pmemstream *stream, uint64_t offset)
