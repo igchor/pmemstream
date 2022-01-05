@@ -28,6 +28,10 @@ RUN apt-get update \
 COPY install-rapidcheck.sh install-rapidcheck.sh
 RUN ./install-rapidcheck.sh
 
+# Install miniasync
+COPY install-miniasync.sh install-miniasync.sh
+RUN ./install-miniasync.sh
+
 # Download scripts required in run-*.sh
 COPY download-scripts.sh download-scripts.sh
 COPY 0001-fix-generating-gcov-files-and-turn-off-verbose-log.patch 0001-fix-generating-gcov-files-and-turn-off-verbose-log.patch

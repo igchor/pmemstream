@@ -28,7 +28,8 @@ target_include_directories(pmemstream PRIVATE
 
 target_link_libraries(pmemstream PRIVATE
 	-Wl,--version-script=${PMEMSTREAM_ROOT_DIR}/src/libpmemstream.map
-	${LIBPMEM2_LIBRARIES})
+	${LIBPMEM2_LIBRARIES}
+	miniasync) # XXX: add script for finding this
 
 set_target_properties(pmemstream PROPERTIES
 	SOVERSION 0
