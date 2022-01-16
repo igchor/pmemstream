@@ -212,7 +212,7 @@ int pmemstream_reserve(struct pmemstream *stream, struct pmemstream_region regio
 		       struct pmemstream_region_runtime *region_runtime, size_t size,
 		       struct pmemstream_entry *reserved_entry, void **data_addr)
 {
-	size_t entry_total_size = size + SPAN_ENTRY_METADATA_SIZE;
+	size_t entry_total_size = size + SPAN_ENTRY_METADATA_SIZE + 8 /*XXX: constant */;
 	size_t entry_total_size_span_aligned = ALIGN_UP(entry_total_size, sizeof(span_bytes));
 	struct span_runtime region_srt = span_get_region_runtime(stream, region.offset);
 	int ret = 0;
@@ -229,29 +229,11 @@ int pmemstream_reserve(struct pmemstream *stream, struct pmemstream_region regio
 		return ret;
 	}
 
-	uint64_t offset = __atomic_load_n(&region_runtime->append_offset, __ATOMIC_RELAXED);
-	if (offset & PMEMSTREAM_OFFSET_DIRTY_BIT) {
-		pthread_mutex_lock(&stream->recover_region_lock);
-
-		if (offset == __atomic_load_n(&region_runtime->append_offset, __ATOMIC_RELAXED)) {
-			offset &= PMEMSTREAM_OFFSET_MASK;
-			pmemstream_clear_region_remaining(stream, region, offset);
-			__atomic_store_n(&region_runtime->append_offset, offset, __ATOMIC_RELEASE);
-
-			mpmc_queue_reset(stream->mpmc_queue, offset);
-		}
-
-		pthread_mutex_unlock(&stream->recover_region_lock);
-	}
-
 	uint64_t append_offset =
 		mpmc_queue_acquire(stream->mpmc_queue, pmemstream_thread_id(stream), entry_total_size_span_aligned);
+	assert(append_offset > region_srt.data_offset);
 
-	if (offset + entry_total_size_span_aligned > region.offset + region_srt.total_size) {
-		return -1;
-	}
-	/* offset outside of region */
-	if (append_offset < region_srt.data_offset) {
+	if (append_offset + entry_total_size_span_aligned > region.offset + region_srt.total_size) {
 		return -1;
 	}
 
@@ -280,6 +262,11 @@ static enum future_state pmemstream_async_commit_impl(struct future_context *ctx
 {
 	struct pmemstream_async_commit_data *data = future_context_get_data(ctx);
 	if (pmemstream_poll_prev_appends(data->stream, data->target_offset) == 0) {
+
+		// APPROACH 2:
+		uint64_t *mark_ptr = (uint64_t*) pmemstream_offset_to_ptr(data->stream, data->target_offset - 8);
+		data->stream->memset(mark_ptr, 1, 8, PMEM2_F_MEM_NOFLUSH); // should we flush here?
+
 		return FUTURE_STATE_COMPLETE;
 	}
 
@@ -301,12 +288,28 @@ static int pmemstream_internal_publish(struct pmemstream *stream, struct pmemstr
 				       size_t size, struct pmemstream_entry *reserved_entry, int flags,
 				       struct pmemstream_commit_future *commit_future)
 {
+	/* XXX: Handle possible garbage after this entry:
+	 * Approach 1 (no extra 8 bytes, just write 0 where next entry metadata will be):
+	 *   __atomic_exchange to 0, if previous value was not 0 AND append_offset has been increased,
+	 *   revert to the old value (metadata for new entry). Iterators must also be aware of this:
+	 *   if metadata of entry with offset < commited_offset is 0 then it should spin for a while
+	 *   (wait for the revert to happen).
+	 * 
+	 *   For storing metadata we still use memcpy (XXX: will this sync correctly with CAS?)
+	 * Approach 2:
+	 *    Always set last 8 bytes to 0 (BEFORE calling mpmc_queue_produce). Every append which is
+	 *    executed next, will have to set the bytes to some other value (all 1s?) just before marking
+	 *    future as completed (but after calling mpmc_queue_produce).
+	 */
+
 	span_create_entry(stream, reserved_entry->offset, data, size, util_popcount_memory(data, size), flags);
+	struct span_runtime entry_rt = span_get_entry_runtime(stream, reserved_entry->offset); // XXX: this read data written using NONTEMPORALS
+	uint64_t target_offset = reserved_entry->offset + entry_rt.entry.size;
+
+	// APPROACH 2 (XXX: no iterator support as of now):
+	stream->memset((void*)(target_offset - 8), 0, 8);
 
 	mpmc_queue_produce(stream->mpmc_queue, pmemstream_thread_id(stream));
-
-	struct span_runtime entry_rt = span_get_entry_runtime(stream, reserved_entry->offset);
-	uint64_t target_offset = reserved_entry->offset + entry_rt.entry.size;
 
 	struct pmemstream_commit_future future = pmemstream_async_commit(stream, target_offset);
 	if (commit_future) {
