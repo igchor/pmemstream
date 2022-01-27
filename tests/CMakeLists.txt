@@ -92,6 +92,9 @@ add_test_generic(NAME region_initialize TRACERS none memcheck drd helgrind)
 build_test(stream_from_map api_c/stream_from_map.c)
 add_test_generic(NAME stream_from_map TRACERS none memcheck pmemcheck drd helgrind)
 
+build_test_rc(NAME concurrent_iterate_with_append SRC_FILES unittest/concurrent_iterate_with_append.cpp)
+add_test_generic(NAME concurrent_iterate_with_append TRACERS none drd helgrind memcheck)
+
 if(TESTS_RAPIDCHECK)
 	build_test_rc(NAME append SRC_FILES unittest/append.cpp)
 	add_test_generic(NAME append TRACERS none)
@@ -99,8 +102,8 @@ if(TESTS_RAPIDCHECK)
 	build_test_rc(NAME concurrent_iterate SRC_FILES unittest/concurrent_iterate.cpp)
 	add_test_generic(NAME concurrent_iterate TRACERS none)
 
-	build_test_rc(NAME concurrent_iterate_with_append SRC_FILES unittest/concurrent_iterate_with_append.cpp)
-	add_test_generic(NAME concurrent_iterate_with_append TRACERS none)
+	build_test_rc(NAME concurrent_iterate_with_append_rc SRC_FILES unittest/rapidcheck/concurrent_iterate_with_append.cpp)
+	add_test_generic(NAME concurrent_iterate_with_append_rc TRACERS none)
 
 	build_test_rc(NAME create SRC_FILES unittest/create.cpp)
 	add_test_generic(NAME create TRACERS none)

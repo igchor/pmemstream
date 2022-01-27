@@ -8,6 +8,8 @@
 #include <assert.h>
 #include <errno.h>
 
+#include <valgrind/drd.h>
+
 #define PMEMSTREAM_OFFSET_UNINITIALIZED 0ULL
 #define PMEMSTREAM_OFFSET_DIRTY_BIT (1ULL << 63)
 #define PMEMSTREAM_OFFSET_DIRTY_MASK (~PMEMSTREAM_OFFSET_DIRTY_BIT)
@@ -21,6 +23,8 @@
  * - By advancing an entry iterator past last entry in a region (only if region_runtime does not exist yet)
  */
 struct pmemstream_region_runtime {
+	bool initialized;
+
 	/*
 	 * Offset at which new entries will be appended. Also serves as indicator of region runtime initialization
 	 * state.
@@ -147,13 +151,17 @@ int region_runtimes_map_get_or_create(struct region_runtimes_map *map, struct pm
 uint64_t region_runtime_get_append_offset_acquire(const struct pmemstream_region_runtime *region_runtime)
 {
 	assert(region_runtime_is_initialized(region_runtime));
-	return __atomic_load_n(&region_runtime->append_offset, __ATOMIC_ACQUIRE) & PMEMSTREAM_OFFSET_DIRTY_MASK;
+	uint64_t ret = __atomic_load_n(&region_runtime->append_offset, __ATOMIC_ACQUIRE) & PMEMSTREAM_OFFSET_DIRTY_MASK;
+	ANNOTATE_HAPPENS_AFTER(&region_runtime->append_offset);
+	return ret;
 }
 
 uint64_t region_runtime_get_committed_offset_acquire(const struct pmemstream_region_runtime *region_runtime)
 {
 	assert(region_runtime_is_initialized(region_runtime));
-	return __atomic_load_n(&region_runtime->committed_offset, __ATOMIC_ACQUIRE);
+	uint64_t ret = __atomic_load_n(&region_runtime->committed_offset, __ATOMIC_ACQUIRE);
+	ANNOTATE_HAPPENS_AFTER(&region_runtime->committed_offset);
+	return ret;
 }
 
 void region_runtimes_map_remove(struct region_runtimes_map *map, struct pmemstream_region region)
@@ -164,8 +172,8 @@ void region_runtimes_map_remove(struct region_runtimes_map *map, struct pmemstre
 
 bool region_runtime_is_initialized(const struct pmemstream_region_runtime *region_runtime)
 {
-	bool ret = __atomic_load_n(&region_runtime->append_offset, __ATOMIC_ACQUIRE) != PMEMSTREAM_OFFSET_UNINITIALIZED;
-	/* XXX: ANNOTATE_HAPPENS_AFTER(&region_runtime->append_offset); */
+	bool ret = __atomic_load_n(&region_runtime->initialized, __ATOMIC_ACQUIRE);
+	ANNOTATE_HAPPENS_AFTER(&region_runtime->initialized);
 	return ret;
 }
 
@@ -176,11 +184,13 @@ bool region_runtime_is_dirty(const struct pmemstream_region_runtime *region_runt
 
 void region_runtime_increase_append_offset(struct pmemstream_region_runtime *region_runtime, uint64_t diff)
 {
+	ANNOTATE_HAPPENS_BEFORE(&region_runtime->append_offset);
 	__atomic_fetch_add(&region_runtime->append_offset, diff, __ATOMIC_RELAXED);
 }
 
 void region_runtime_increase_committed_offset(struct pmemstream_region_runtime *region_runtime, uint64_t diff)
 {
+	ANNOTATE_HAPPENS_BEFORE(&region_runtime->committed_offset);
 	__atomic_fetch_add(&region_runtime->committed_offset, diff, __ATOMIC_RELEASE);
 }
 
@@ -215,6 +225,8 @@ int region_runtime_try_initialize_locked(struct pmemstream *stream, struct pmems
 		pthread_mutex_unlock(&stream->region_runtimes_map->region_lock);
 	}
 
+	assert(region_runtime_is_initialized(region_runtime));
+
 	return ret;
 }
 
@@ -241,10 +253,8 @@ void region_runtime_initialize(struct pmemstream_region_runtime *region_runtime,
 
 	/* We use relaxed here because of release fence at the end. */
 	if (region_runtime_try_initialize_committed_offset_relaxed(region_runtime, tail.offset)) {
-		/* XXX: ANNOTATE_HAPPENS_BEFORE(&region_runtime->append_offset); */
-		uint64_t prev_append_offset = __atomic_exchange_n(
-			&region_runtime->append_offset, tail.offset | PMEMSTREAM_OFFSET_DIRTY_BIT, __ATOMIC_RELAXED);
-		assert(prev_append_offset == PMEMSTREAM_OFFSET_UNINITIALIZED);
+		region_runtime->append_offset = tail.offset | PMEMSTREAM_OFFSET_DIRTY_BIT;
+		__atomic_test_and_set(&region_runtime->initialized, __ATOMIC_RELEASE);
 	}
 }
 
@@ -259,7 +269,7 @@ static void region_runtime_clear_from_tail(struct pmemstream *stream, struct pme
 		span_create_empty(stream, tail, remaining_size - SPAN_EMPTY_METADATA_SIZE);
 	}
 
-	__atomic_store_n(&region_runtime->append_offset, tail, __ATOMIC_RELEASE);
+	__atomic_exchange_n(&region_runtime->append_offset, tail, __ATOMIC_RELEASE);
 }
 
 uint64_t region_runtime_try_clear_from_tail(struct pmemstream *stream, struct pmemstream_region region,
