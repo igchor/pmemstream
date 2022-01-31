@@ -103,46 +103,30 @@ struct return_check {
 	bool status = true;
 };
 
-size_t get_num_regions(pmemstream *stream)
+std::unique_ptr<struct pmemstream, std::function<void(struct pmemstream *)>> make_pmemstream(const std::string &file, size_t block_size, size_t size, bool truncate = true)
 {
-	pmemstream_region_iterator *riter;
-	UT_ASSERT(pmemstream_region_iterator_new(&riter, stream) == 0);
+		struct pmem2_map *map = map_open(file.c_str(), size, truncate);
+		if (map == NULL) {
+			throw std::runtime_error(pmem2_errormsg());
+		}
 
-	size_t num = 0;
-	pmemstream_region region;
-	while (pmemstream_region_iterator_next(riter, &region) == 0) {
-		num++;
-	}
+		auto map_delete = [](struct pmem2_map *map) { pmem2_map_delete(&map); };
+		auto map_sptr = std::shared_ptr<struct pmem2_map>(map, map_delete);
 
-	return num;
-}
+		struct pmemstream *stream;
+		int ret = pmemstream_from_map(&stream, block_size, map);
+		if (ret == -1) {
+			throw std::runtime_error("pmemstream_from_map failed");
+		}
 
-std::unique_ptr<struct pmemstream, std::function<void(struct pmemstream *)>>
-make_pmemstream(const std::string &file, size_t block_size, size_t size, bool truncate = true)
-{
-	struct pmem2_map *map = map_open(file.c_str(), size, truncate);
-	if (map == NULL) {
-		throw std::runtime_error(pmem2_errormsg());
-	}
+		auto stream_delete = [map_sptr](struct pmemstream *stream) { pmemstream_delete(&stream); };
+		ptr = std::unique_ptr<struct pmemstream, std::function<void(struct pmemstream *)>>(stream,
+												   stream_delete);
 
-	auto map_delete = [](struct pmem2_map *map) { pmem2_map_delete(&map); };
-	auto map_sptr = std::shared_ptr<struct pmem2_map>(map, map_delete);
+		if (truncate) {
+			UT_ASSERTeq(get_num_regions(ptr.get()), 0);
 
-	struct pmemstream *stream;
-	int ret = pmemstream_from_map(&stream, block_size, map);
-	if (ret == -1) {
-		throw std::runtime_error("pmemstream_from_map failed");
-	}
-
-	auto stream_delete = [map_sptr](struct pmemstream *stream) { pmemstream_delete(&stream); };
-	auto stream_ptr =
-		std::unique_ptr<struct pmemstream, std::function<void(struct pmemstream *)>>(stream, stream_delete);
-
-	if (truncate) {
-		UT_ASSERTeq(get_num_regions(stream_ptr.get()), 0);
-	}
-
-	return stream_ptr;
+		return ptr;
 }
 
 /* Return function which constructs (creates unique_ptr) an instance of an object using ctor().

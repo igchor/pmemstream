@@ -101,19 +101,19 @@ add_test_generic(NAME stream_from_map TRACERS none memcheck pmemcheck drd helgri
 
 if(TESTS_RAPIDCHECK)
 	build_test_rc(NAME append SRC_FILES unittest/append.cpp)
-	add_test_generic(NAME append TRACERS none)
+	add_test_generic(NAME append TRACERS none memcheck pmemcheck)
 
 	build_test_rc(NAME concurrent_iterate SRC_FILES unittest/concurrent_iterate.cpp)
 	add_test_generic(NAME concurrent_iterate TRACERS none)
 
 	build_test_rc(NAME concurrent_iterate_with_append SRC_FILES unittest/concurrent_iterate_with_append.cpp)
-	add_test_generic(NAME concurrent_iterate_with_append TRACERS none)
+	add_test_generic(NAME concurrent_iterate_with_append TRACERS none pmemcheck)
 
 	build_test_rc(NAME create SRC_FILES unittest/create.cpp)
-	add_test_generic(NAME create TRACERS none)
+	add_test_generic(NAME create TRACERS none memcheck pmemcheck)
 
 	build_test_rc(NAME get_region_runtime SRC_FILES unittest/get_region_runtime.cpp)
-	add_test_generic(NAME get_region_runtime TRACERS none)
+	add_test_generic(NAME get_region_runtime TRACERS none memcheck pmemcheck)
 
 	build_test_rc(NAME id_manager SRC_FILES unittest/id_manager.cpp ../src/id_manager.c ../src/critnib/critnib.c)
 	add_test_generic(NAME id_manager TRACERS none memcheck)
@@ -125,7 +125,7 @@ if(TESTS_RAPIDCHECK)
 	add_test_generic(NAME util_popcount TRACERS none)
 
 	build_test_rc(NAME iterate_validation SRC_FILES layout/iterate_validation.cpp ../src/span.c)
-	add_test_generic(NAME iterate_validation TRACERS none)
+	add_test_generic(NAME iterate_validation TRACERS none memcheck pmemcheck)
 endif()
 
 if(GDB AND DEBUG_BUILD)

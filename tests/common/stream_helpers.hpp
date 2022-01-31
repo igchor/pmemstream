@@ -10,7 +10,30 @@
 
 #include "unittest.hpp"
 
-void append(struct pmemstream *stream, struct pmemstream_region region,
+struct test_pmemstream
+{
+
+	test_pmemstream(const std::string &file, size_t block_size, size_t size, bool truncate = true) {
+		params = std::tuple<std::string, size_t, size_t>(file, block_size, size);
+		ptr = make_pmemstream(file, block_size, size);
+	}
+
+	void region_runtime_initialize(struct pmemstream_region region) {
+		int ret = pmemstream_get_region_runtime(ptr.get(), region, &region_runtime);
+		UT_ASSERTeq(ret, 0);
+	}
+
+	void region_runtime_set_null(struct pmemstream_region region) [
+		// XXX; 
+	]
+
+	void reopen() {
+		ptr.reset(nullptr);
+		ptr = std::apply(make_pmemstream, params);
+		region_runtime_initialize();
+	}
+
+	void append(struct pmemstream *stream, struct pmemstream_region region,
 	    struct pmemstream_region_runtime *region_runtime, const std::vector<std::string> &data)
 {
 	for (const auto &e : data) {
@@ -89,4 +112,25 @@ void reserve_and_publish(struct pmemstream *stream, struct pmemstream_region reg
 		RC_ASSERT(ret == 0);
 	}
 }
+
+	size_t get_num_regions(pmemstream *stream)
+{
+	pmemstream_region_iterator *riter;
+	UT_ASSERT(pmemstream_region_iterator_new(&riter, stream) == 0);
+
+	size_t num = 0;
+	pmemstream_region region;
+	while (pmemstream_region_iterator_next(riter, &region) == 0) {
+		num++;
+	}
+
+	return num;
+}
+
+private:
+	std::tuple<std::string, size_t, size_t> params;
+	std::map<struct pmemstream_region, pmemstream_region_runtime *runtime>;
+	std::unique_ptr<struct pmemstream, std::function<void(struct pmemstream *)>> ptr;
+};
+
 #endif /* LIBPMEMSTREAM_STREAM_HELPERS_HPP */

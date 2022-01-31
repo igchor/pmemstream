@@ -39,7 +39,7 @@ static void span_create_entry_internal(struct pmemstream *stream, uint64_t offse
 	span[0] = data_size | SPAN_ENTRY;
 	span[1] = popcount;
 
-	stream->persist(span, flush_size);
+	stream->persist(span, 16);
 }
 
 /* Creates entry span at given offset.

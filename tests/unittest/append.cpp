@@ -27,12 +27,26 @@ int main(int argc, char *argv[])
 		 */
 		ret += rc::check(
 			"verify if iteration return proper elements after append",
-			[&](const std::vector<std::string> &data, const std::vector<std::string> &extra_data) {
+			[&](const std::vector<std::string> &data, const std::vector<std::string> &extra_data,
+			    bool reopen_after_init, bool reopen_after_append, bool user_created_runtime) {
 				auto stream = make_pmemstream(path, TEST_DEFAULT_BLOCK_SIZE, TEST_DEFAULT_STREAM_SIZE);
 				auto region =
 					initialize_stream_single_region(stream.get(), TEST_DEFAULT_REGION_SIZE, data);
 				verify(stream.get(), region, data, {});
-				append(stream.get(), region, NULL, extra_data);
+
+				if (reopen_after_init)
+					stream.reopen();
+
+				pmemstream_region_runtime *runtime = NULL;
+				if (user_created_runtime) {
+					pmemstream_get_region_runtime(stream.get(), region, &runtime);
+				}
+
+				append(stream.get(), region, runtime, extra_data);
+
+				if (reopen_after_append)
+					stream.reopen();
+
 				verify(stream.get(), region, data, extra_data);
 			});
 
@@ -56,13 +70,16 @@ int main(int argc, char *argv[])
 			UT_ASSERTeq(ret, -1);
 		}
 
-		ret += rc::check("verify append will work until OOM", [&]() {
+		ret += rc::check("verify append will work until OOM", [&](bool reopen) {
 			auto stream = make_pmemstream(path, TEST_DEFAULT_BLOCK_SIZE, TEST_DEFAULT_STREAM_SIZE);
 			auto region = initialize_stream_single_region(stream.get(), TEST_DEFAULT_REGION_SIZE, {});
 
 			size_t elems = 10;
 			const size_t e_size = TEST_DEFAULT_REGION_SIZE / elems - TEST_DEFAULT_BLOCK_SIZE;
 			std::string e = *rc::gen::container<std::string>(e_size, rc::gen::character<char>());
+
+			if (reopen)
+				stream.reopen();
 
 			struct pmemstream_entry ne = {0}, prev_ne = {0};
 			while (elems-- > 0) {
@@ -82,46 +99,5 @@ int main(int argc, char *argv[])
 			RC_ASSERT(ne.offset > prev_ne.offset);
 			RC_ASSERT(ret == 0);
 		});
-
-		ret += rc::check("verify if iteration return proper elements after pmemstream reopen",
-				 [&](const std::vector<std::string> &data, const std::vector<std::string> &extra_data) {
-					 pmemstream_region region;
-					 {
-						 auto stream = make_pmemstream(path, TEST_DEFAULT_BLOCK_SIZE,
-									       TEST_DEFAULT_STREAM_SIZE);
-						 region = initialize_stream_single_region(
-							 stream.get(), TEST_DEFAULT_REGION_SIZE, data);
-						 verify(stream.get(), region, data, {});
-					 }
-					 {
-						 auto stream = make_pmemstream(path, TEST_DEFAULT_BLOCK_SIZE,
-									       TEST_DEFAULT_STREAM_SIZE, false);
-						 verify(stream.get(), region, data, {});
-					 }
-				 });
-
-		ret += rc::check("verify if iteration return proper elements after append after pmemstream reopen",
-				 [&](const std::vector<std::string> &data, const std::vector<std::string> &extra_data,
-				     bool user_created_runtime) {
-					 pmemstream_region region;
-					 {
-						 auto stream = make_pmemstream(path, TEST_DEFAULT_BLOCK_SIZE,
-									       TEST_DEFAULT_STREAM_SIZE);
-						 region = initialize_stream_single_region(
-							 stream.get(), TEST_DEFAULT_REGION_SIZE, data);
-						 verify(stream.get(), region, data, {});
-					 }
-					 {
-						 auto stream = make_pmemstream(path, TEST_DEFAULT_BLOCK_SIZE,
-									       TEST_DEFAULT_STREAM_SIZE, false);
-						 pmemstream_region_runtime *runtime = NULL;
-						 if (user_created_runtime) {
-							 pmemstream_get_region_runtime(stream.get(), region, &runtime);
-						 }
-
-						 append(stream.get(), region, runtime, extra_data);
-						 verify(stream.get(), region, data, extra_data);
-					 }
-				 });
 	});
 }

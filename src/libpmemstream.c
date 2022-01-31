@@ -12,6 +12,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <valgrind/pmemcheck.h>
+
 static int pmemstream_is_initialized(struct pmemstream *stream)
 {
 	if (strcmp(stream->data->header.signature, PMEMSTREAM_SIGNATURE) != 0) {
@@ -71,6 +73,8 @@ int pmemstream_from_map(struct pmemstream **stream, size_t block_size, struct pm
 		goto err;
 	}
 
+	VALGRIND_PMC_REGISTER_PMEM_MAPPING(s->data->spans, s->usable_size);
+
 	*stream = s;
 	return 0;
 
@@ -82,6 +86,9 @@ err:
 void pmemstream_delete(struct pmemstream **stream)
 {
 	struct pmemstream *s = *stream;
+
+	VALGRIND_PMC_REMOVE_PMEM_MAPPING(s->data->spans, s->usable_size);
+
 	region_runtimes_map_destroy(s->region_runtimes_map);
 	free(s);
 	*stream = NULL;
