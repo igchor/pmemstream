@@ -50,8 +50,6 @@ int main(int argc, char *argv[])
 							    extra_entry.size(), nullptr);
 				RC_ASSERT(ret == 0);
 				verify(stream.get(), region, data, my_data);
-
-				RC_ASSERT(pmemstream_region_free(stream.get(), region) == 0);
 			});
 
 		ret += rc::check("verify if reserve+publish by hand will behave the same as regular append",
@@ -65,8 +63,6 @@ int main(int argc, char *argv[])
 							 stream.get(), TEST_DEFAULT_REGION_SIZE, data);
 						 verify(stream.get(), region, data, {});
 						 a_data = get_elements_in_region(stream.get(), region);
-
-						 RC_ASSERT(pmemstream_region_free(stream.get(), region) == 0);
 					 }
 					 /* publish-reserve by hand of the same 'data' (in a different file) */
 					 std::vector<std::string> rp_data;
@@ -80,8 +76,6 @@ int main(int argc, char *argv[])
 
 						 RC_ASSERT(std::equal(a_data.begin(), a_data.end(), rp_data.begin(),
 								      rp_data.end()));
-
-						 RC_ASSERT(pmemstream_region_free(stream.get(), region) == 0);
 					 }
 				 });
 

@@ -103,6 +103,20 @@ struct return_check {
 	bool status = true;
 };
 
+size_t get_num_regions(pmemstream *stream)
+{
+	pmemstream_region_iterator *riter;
+	UT_ASSERT(pmemstream_region_iterator_new(&riter, stream) == 0);
+
+	size_t num = 0;
+	pmemstream_region region;
+	while (pmemstream_region_iterator_next(riter, &region) == 0) {
+		num++;
+	}
+
+	return num;
+}
+
 std::unique_ptr<struct pmemstream, std::function<void(struct pmemstream *)>>
 make_pmemstream(const std::string &file, size_t block_size, size_t size, bool truncate = true)
 {
@@ -121,7 +135,14 @@ make_pmemstream(const std::string &file, size_t block_size, size_t size, bool tr
 	}
 
 	auto stream_delete = [map_sptr](struct pmemstream *stream) { pmemstream_delete(&stream); };
-	return std::unique_ptr<struct pmemstream, std::function<void(struct pmemstream *)>>(stream, stream_delete);
+	auto stream_ptr =
+		std::unique_ptr<struct pmemstream, std::function<void(struct pmemstream *)>>(stream, stream_delete);
+
+	if (truncate) {
+		UT_ASSERTeq(get_num_regions(stream_ptr.get()), 0);
+	}
+
+	return stream_ptr;
 }
 
 /* Return function which constructs (creates unique_ptr) an instance of an object using ctor().

@@ -34,7 +34,6 @@ int main(int argc, char *argv[])
 				verify(stream.get(), region, data, {});
 				append(stream.get(), region, NULL, extra_data);
 				verify(stream.get(), region, data, extra_data);
-				RC_ASSERT(pmemstream_region_free(stream.get(), region) == 0);
 			});
 
 		/* verify if an entry of size = 0 can be appended and entry with size > region's size cannot */
@@ -55,8 +54,6 @@ int main(int argc, char *argv[])
 			entry = std::string(max_size + 1, 'W');
 			ret = pmemstream_append(stream.get(), region, nullptr, entry.data(), entry.size(), nullptr);
 			UT_ASSERTeq(ret, -1);
-
-			UT_ASSERTeq(pmemstream_region_free(stream.get(), region), 0);
 		}
 
 		ret += rc::check("verify append will work until OOM", [&]() {
@@ -84,8 +81,6 @@ int main(int argc, char *argv[])
 			ret = pmemstream_append(stream.get(), region, nullptr, e.data(), e.size(), &ne);
 			RC_ASSERT(ne.offset > prev_ne.offset);
 			RC_ASSERT(ret == 0);
-
-			RC_ASSERT(pmemstream_region_free(stream.get(), region) == 0);
 		});
 
 		ret += rc::check("verify if iteration return proper elements after pmemstream reopen",
@@ -102,7 +97,6 @@ int main(int argc, char *argv[])
 						 auto stream = make_pmemstream(path, TEST_DEFAULT_BLOCK_SIZE,
 									       TEST_DEFAULT_STREAM_SIZE, false);
 						 verify(stream.get(), region, data, {});
-						 RC_ASSERT(pmemstream_region_free(stream.get(), region) == 0);
 					 }
 				 });
 
@@ -127,7 +121,6 @@ int main(int argc, char *argv[])
 
 						 append(stream.get(), region, runtime, extra_data);
 						 verify(stream.get(), region, data, extra_data);
-						 RC_ASSERT(pmemstream_region_free(stream.get(), region) == 0);
 					 }
 				 });
 	});

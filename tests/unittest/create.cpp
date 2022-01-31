@@ -36,8 +36,6 @@ int main(int argc, char *argv[])
 			auto stream = make_pmemstream(path, TEST_DEFAULT_BLOCK_SIZE, TEST_DEFAULT_STREAM_SIZE);
 			auto region = initialize_stream_single_region(stream.get(), region_size, data);
 			verify(stream.get(), region, data, {});
-
-			RC_ASSERT(pmemstream_region_free(stream.get(), region) == 0);
 		});
 
 		ret += rc::check(
@@ -61,7 +59,6 @@ int main(int argc, char *argv[])
 				RC_ASSERT(ret == -1);
 
 				pmemstream_region_iterator_delete(&riter);
-				RC_ASSERT(pmemstream_region_free(stream.get(), region) == 0);
 			});
 
 		/* verify if a single region of size = 0 can be created */
@@ -75,8 +72,6 @@ int main(int argc, char *argv[])
 			auto ret =
 				pmemstream_append(stream.get(), region, nullptr, entry.data(), entry.size(), nullptr);
 			RC_ASSERT(ret != 0);
-
-			RC_ASSERT(pmemstream_region_free(stream.get(), region) == 0);
 		}
 
 		ret += rc::check("verify if a region of size > stream_size cannot be created", [&]() {
@@ -95,8 +90,6 @@ int main(int argc, char *argv[])
 			/* and initialize this stream with a single region of */
 			auto region = initialize_stream_single_region(stream.get(), region_size, {});
 			verify(stream.get(), region, {}, {});
-
-			RC_ASSERT(pmemstream_region_free(stream.get(), region) == 0);
 		});
 
 		ret += rc::check("verify if a stream of various block_sizes can be created", [&]() {
@@ -107,8 +100,6 @@ int main(int argc, char *argv[])
 			/* and initialize this stream with a single region of */
 			auto region = initialize_stream_single_region(stream.get(), block_size / 10UL, {});
 			verify(stream.get(), region, {}, {});
-
-			RC_ASSERT(pmemstream_region_free(stream.get(), region) == 0);
 		});
 
 		/* verify if a stream of block_size = 0 cannot be created */
@@ -122,5 +113,46 @@ int main(int argc, char *argv[])
 				UT_ASSERT_UNREACHABLE;
 			}
 		}
+
+		ret += rc::check("verify if region deallocated using region_free is not returned by region iterator",
+				 [&](const std::string &entry) {
+					 pmemstream_region region;
+
+					 {
+						 auto stream = make_pmemstream(path, TEST_DEFAULT_BLOCK_SIZE,
+									       TEST_DEFAULT_STREAM_SIZE);
+						 region = initialize_stream_single_region(
+							 stream.get(), TEST_DEFAULT_REGION_SIZE, {entry});
+
+						 RC_ASSERT(get_num_regions(stream.get()) == 1);
+						 pmemstream_region_free(stream.get(), region);
+						 RC_ASSERT(get_num_regions(stream.get()) == 0);
+					 }
+
+					 {
+						 auto stream = make_pmemstream(path, TEST_DEFAULT_BLOCK_SIZE,
+									       TEST_DEFAULT_STREAM_SIZE, false);
+						 RC_ASSERT(get_num_regions(stream.get()) == 0);
+					 }
+				 });
+
+		ret += rc::check("verify if we can repopulate stream with the same data after region reallocate",
+				 [&](const std::vector<std::string> &data) {
+					 {
+						 auto stream = make_pmemstream(path, TEST_DEFAULT_BLOCK_SIZE,
+									       TEST_DEFAULT_STREAM_SIZE);
+						 auto region = initialize_stream_single_region(
+							 stream.get(), TEST_DEFAULT_REGION_SIZE, data);
+
+						 UT_ASSERTeq(get_num_regions(stream.get()), 1);
+						 pmemstream_region_free(stream.get(), region);
+						 UT_ASSERTeq(get_num_regions(stream.get()), 0);
+
+						 auto new_region = initialize_stream_single_region(
+							 stream.get(), TEST_DEFAULT_REGION_SIZE, data);
+						 RC_ASSERT(region.offset == new_region.offset);
+						 verify(stream.get(), new_region, data, {});
+					 }
+				 });
 	});
 }

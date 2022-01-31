@@ -93,7 +93,6 @@ int main(int argc, char *argv[])
 								      TEST_DEFAULT_STREAM_SIZE, false);
 					auto stream_data = get_elements_in_region(stream.get(), region);
 					RC_ASSERT(std::equal(data.begin(), data.end(), stream_data.begin()));
-					RC_ASSERT(pmemstream_region_free(stream.get(), region) == 0);
 				}
 			});
 	});
