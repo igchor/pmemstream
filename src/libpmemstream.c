@@ -210,7 +210,7 @@ int pmemstream_publish(struct pmemstream *stream, struct pmemstream_region regio
 		}
 	}
 
-	span_create_entry(stream, reserved_entry->offset, size, util_popcount_memory(data, size));
+	span_create_entry(stream, reserved_entry->offset, size, UINT64_MAX);
 	region_runtime_increase_committed_offset(region_runtime, pmemstream_entry_total_size_aligned(size));
 
 	return 0;
@@ -236,7 +236,7 @@ int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region
 	}
 
 	stream->memcpy(reserved_dest, data, size, PMEM2_F_MEM_NODRAIN);
-	span_create_entry_no_flush_data(stream, reserved_entry.offset, size, util_popcount_memory(data, size));
+	span_create_entry_no_flush_data(stream, reserved_entry.offset, size, UINT64_MAX);
 	region_runtime_increase_committed_offset(region_runtime, pmemstream_entry_total_size_aligned(size));
 
 	if (new_entry) {
