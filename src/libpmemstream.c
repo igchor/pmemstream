@@ -282,7 +282,8 @@ int pmemstream_publish(struct pmemstream *stream, struct pmemstream_region regio
 	region_runtime_produce_append_offset(region_runtime, producer_id);
 
 	while (!region_runtime_try_consume(region_runtime,
-					   reserved_entry->offset + pmemstream_entry_total_size_aligned(size))) {
+					   reserved_entry->offset + pmemstream_entry_total_size_aligned(size),
+					   thread_id_max_num_used(stream->thread_id) + 1)) {
 		/* XXX: can use umwait? */
 	}
 
@@ -314,7 +315,8 @@ int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region
 	region_runtime_produce_append_offset(region_runtime, producer_id);
 
 	while (!region_runtime_try_consume(region_runtime,
-					   reserved_entry.offset + pmemstream_entry_total_size_aligned(size))) {
+					   reserved_entry.offset + pmemstream_entry_total_size_aligned(size),
+					   thread_id_max_num_used(stream->thread_id) + 1)) {
 		/* XXX: can use umwait? */
 	}
 
