@@ -205,6 +205,9 @@ int pmemstream_reserve(struct pmemstream *stream, struct pmemstream_region regio
 
 	reserved_entry->offset = offset;
 	/* data is right after the entry metadata */
+
+	// XXX: here offset should be taken modulo region_size
+	// and handle wraparound
 	*data_addr = (void *)span_offset_to_span_ptr(stream, offset + SPAN_ENTRY_METADATA_SIZE);
 
 	return ret;
