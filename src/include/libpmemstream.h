@@ -28,6 +28,8 @@ struct pmemstream_entry {
 	uint64_t offset;
 };
 
+void pmemstream_wait(struct pmemstream *stream, struct pmemstream_region_runtime *region_runtime, struct pmemstream_entry entry);
+
 // manages lifecycle of the stream. Can be based on top of a raw pmem2_map
 // or a pmemset (TBD).
 // block_size defines alignment of regions - must be a power of 2 and multiple of CACHELINE size.

@@ -232,12 +232,14 @@ class pmemstream_workload : public benchmark::workload_base {
 	void perform() override
 	{
 		auto data_chunks = get_data_chunks();
+                struct pmemstream_entry entry;
 		for (size_t i = 0; i < data.size() * sizeof(uint64_t); i += cfg.element_size) {
 			if (pmemstream_append(stream.get(), region, region_runtime_ptr, data_chunks + i,
-					      cfg.element_size, NULL) < 0) {
+					      cfg.element_size, &entry) < 0) {
 				throw std::runtime_error("Error while appending " + std::to_string(i) + " entry!");
 			}
 		}
+		pmemstream_wait(stream.get(), region_runtime_ptr, entry);
 	}
 
 	void clean() override
