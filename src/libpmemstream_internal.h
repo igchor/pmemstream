@@ -8,8 +8,9 @@
 
 #include "iterator.h"
 #include "libpmemstream.h"
-#include "region.h"
-#include "span.h"
+#include "span/empty.h"
+#include "span/entry.h"
+#include "span/region.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -6,17 +6,19 @@
 #ifndef LIBPMEMSTREAM_REGION_H
 #define LIBPMEMSTREAM_REGION_H
 
-#include "critnib/critnib.h"
-#include "libpmemstream.h"
-#include "span.h"
-
-#include <pthread.h>
-#include <stdbool.h>
 #include <stdint.h>
+
+#include "span.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* XXX: use CACHELINE_SIZE + static_assert 64 >= sizeof(region_metadata)*/
+#define REGION_METADATA_SIZE 64
+
+struct region_runtimes_map;
+struct pmemstream_region_runtime;
 
 /**
  * Functions for manipulating regions and region_runtime.
@@ -35,31 +37,29 @@ enum region_runtime_state {
 	REGION_RUNTIME_STATE_CLEAR  /* append_offset and committed_offset are known, append is safe */
 };
 
-struct pmemstream_region_runtime;
-struct region_runtimes_map;
-
 struct region_runtimes_map *region_runtimes_map_new(void);
 void region_runtimes_map_destroy(struct region_runtimes_map *map);
+
+void region_create(const struct pmemstream_data_runtime *data, struct pmemstream_region region);
 
 /*
  * Gets (or creates if missing) pointer to region_runtime associated with specified region.
  *
  * Returned region_runtime might be in all 3 states (uninitialized, dirty or clear).
  */
-int region_runtimes_map_get_or_create(struct region_runtimes_map *map, struct pmemstream_region region,
-				      struct pmemstream_region_runtime **container_handle);
-void region_runtimes_map_remove(struct region_runtimes_map *map, struct pmemstream_region region);
+int region_get_runtime(struct pmemstream_region_runtime **container_handle, struct region_runtimes_map *map, struct pmemstream_region region);
+void region_remove_runtime(struct region_runtimes_map *map, struct pmemstream_region region);
 
-enum region_runtime_state region_runtime_get_state_acquire(const struct pmemstream_region_runtime *region_runtime);
+enum region_runtime_state region_get_runtime_state_acquire(const struct pmemstream_region_runtime *region_runtime);
 
-/* Precondition: region_runtime_get_state_acquire() != REGION_RUNTIME_STATE_UNINITIALIZED */
-uint64_t region_runtime_get_append_offset_acquire(const struct pmemstream_region_runtime *region_runtime);
-/* Precondition: region_runtime_get_state_acquire() != REGION_RUNTIME_STATE_UNINITIALIZED */
-uint64_t region_runtime_get_committed_offset_acquire(const struct pmemstream_region_runtime *region_runtime);
+/* Precondition: region_get_runtime_state_acquire() != REGION_RUNTIME_STATE_UNINITIALIZED */
+uint64_t region_get_runtime_append_offset_acquire(const struct pmemstream_region_runtime *region_runtime);
+/* Precondition: region_get_runtime_state_acquire() != REGION_RUNTIME_STATE_UNINITIALIZED */
+uint64_t region_get_runtime_committed_offset_acquire(const struct pmemstream_region_runtime *region_runtime);
 
-/* Precondition: region_runtime_get_state_acquire() == REGION_RUNTIME_STATE_CLEAR */
+/* Precondition: region_get_runtime_state_acquire() == REGION_RUNTIME_STATE_CLEAR */
 void region_runtime_increase_append_offset(struct pmemstream_region_runtime *region_runtime, uint64_t diff);
-/* Precondition: region_runtime_get_state_acquire() == REGION_RUNTIME_STATE_CLEAR */
+/* Precondition: region_get_runtime_state_acquire() == REGION_RUNTIME_STATE_CLEAR */
 void region_runtime_increase_committed_offset(struct pmemstream_region_runtime *region_runtime, uint64_t diff);
 
 /*

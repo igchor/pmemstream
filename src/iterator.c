@@ -4,7 +4,7 @@
 #include "iterator.h"
 #include "common/util.h"
 #include "libpmemstream_internal.h"
-#include "region.h"
+#include "span/region.h"
 
 #include <assert.h>
 #include <stdbool.h>
@@ -27,12 +27,12 @@ int pmemstream_region_iterator_new(struct pmemstream_region_iterator **iterator,
 
 int pmemstream_region_iterator_next(struct pmemstream_region_iterator *it, struct pmemstream_region *region)
 {
-	struct span_runtime srt;
-
 	while (it->region.offset < it->stream->usable_size) {
-		srt = span_get_runtime(&it->stream->data, it->region.offset);
+		enum span_type span_type = span_get_type(&it->stream->data, it->region.offset);
+		
+		 srt = span_get_runtime(&it->stream->data, it->region.offset);
 
-		if (srt.type == SPAN_REGION) {
+		if (span_type == SPAN_REGION) {
 			*region = it->region;
 			it->region.offset += srt.total_size;
 			return 0;
@@ -61,7 +61,7 @@ int entry_iterator_initialize(struct pmemstream_entry_iterator *iterator, struct
 	struct span_runtime region_srt = span_get_region_runtime(&stream->data, region.offset);
 	struct pmemstream_region_runtime *region_rt;
 
-	int ret = region_runtimes_map_get_or_create(stream->region_runtimes_map, region, &region_rt);
+	int ret = region_get_runtime(stream->region_runtimes_map, region, &region_rt);
 	if (ret) {
 		return ret;
 	}
@@ -122,10 +122,10 @@ static bool pmemstream_entry_iterator_offset_is_inside_region(struct pmemstream_
 /* Precondition: region_runtime is initialized. */
 static bool pmemstream_entry_iterator_offset_is_below_committed(struct pmemstream_entry_iterator *iterator)
 {
-	assert(region_runtime_get_state_acquire(iterator->region_runtime) != REGION_RUNTIME_STATE_UNINITIALIZED);
+	assert(region_get_runtime_state_acquire(iterator->region_runtime) != REGION_RUNTIME_STATE_UNINITIALIZED);
 
 	/* Make sure that we didn't go beyond committed entries. */
-	uint64_t committed_offset = region_runtime_get_committed_offset_acquire(iterator->region_runtime);
+	uint64_t committed_offset = region_get_runtime_committed_offset_acquire(iterator->region_runtime);
 	if (iterator->offset >= committed_offset) {
 		return false;
 	}
@@ -158,7 +158,7 @@ static void pmemstream_entry_iterator_advance(struct pmemstream_entry_iterator *
 	 * increment - those checks should not fail unless stream was corrupted. */
 	assert(pmemstream_entry_iterator_offset_is_inside_region(iterator));
 
-	struct span_runtime entry_srt = span_get_entry_runtime(&iterator->stream->data, iterator->offset);
+	struct span_runtime entry_srt = entry_get_runtime(&iterator->stream->data, iterator->offset);
 	iterator->offset += entry_srt.total_size;
 
 	assert(pmemstream_entry_iterator_offset_is_inside_region(iterator));
@@ -199,7 +199,7 @@ int pmemstream_entry_iterator_next(struct pmemstream_entry_iterator *iterator, s
 		*region = iterator->region;
 	}
 
-	if (region_runtime_get_state_acquire(iterator->region_runtime) != REGION_RUNTIME_STATE_UNINITIALIZED) {
+	if (region_get_runtime_state_acquire(iterator->region_runtime) != REGION_RUNTIME_STATE_UNINITIALIZED) {
 		return pmemstream_entry_iterator_next_when_region_initialized(iterator);
 	}
 

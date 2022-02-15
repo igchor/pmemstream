@@ -32,10 +32,10 @@ int main(int argc, char *argv[])
 
 			struct pmemstream_region_runtime *region_runtime;
 			struct pmemstream_region region = {8};
-			int ret = region_runtimes_map_get_or_create(region_runtimes_map.get(), region, &region_runtime);
+			int ret = region_get_runtime(region_runtimes_map.get(), region, &region_runtime);
 			UT_ASSERTeq(ret, 0);
 
-			UT_ASSERTeq(region_runtime_get_state_acquire(region_runtime),
+			UT_ASSERTeq(region_get_runtime_state_acquire(region_runtime),
 				    REGION_RUNTIME_STATE_UNINITIALIZED);
 			syncthreads_barrier syncthreads(concurrency);
 			parallel_exec(concurrency, [&](size_t id) {
@@ -48,21 +48,21 @@ int main(int argc, char *argv[])
 
 					region_runtime_initialize_dirty_locked(region_runtime, entry);
 
-					UT_ASSERTeq(region_runtime_get_state_acquire(region_runtime),
+					UT_ASSERTeq(region_get_runtime_state_acquire(region_runtime),
 						    REGION_RUNTIME_STATE_DIRTY);
 				} else {
 					syncthreads();
 
 					for (size_t i = 0; i < num_repeats; i++) {
-						auto initialized = region_runtime_get_state_acquire(region_runtime) !=
+						auto initialized = region_get_runtime_state_acquire(region_runtime) !=
 							REGION_RUNTIME_STATE_UNINITIALIZED;
 						if (initialized) {
-							UT_ASSERTeq(region_runtime_get_state_acquire(region_runtime),
+							UT_ASSERTeq(region_get_runtime_state_acquire(region_runtime),
 								    REGION_RUNTIME_STATE_DIRTY);
-							auto append_offset = region_runtime_get_append_offset_acquire(
+							auto append_offset = region_get_runtime_append_offset_acquire(
 								region_runtime);
 							auto committed_offset =
-								region_runtime_get_committed_offset_acquire(
+								region_get_runtime_committed_offset_acquire(
 									region_runtime);
 							UT_ASSERTeq(append_offset, committed_offset);
 							UT_ASSERTeq(append_offset, region.offset);
@@ -71,9 +71,9 @@ int main(int argc, char *argv[])
 				}
 			});
 
-			UT_ASSERTeq(region_runtime_get_state_acquire(region_runtime), REGION_RUNTIME_STATE_DIRTY);
+			UT_ASSERTeq(region_get_runtime_state_acquire(region_runtime), REGION_RUNTIME_STATE_DIRTY);
 
-			region_runtimes_map_remove(region_runtimes_map.get(), region);
+			region_remove_runtime(region_runtimes_map.get(), region);
 		}
 	});
 }
