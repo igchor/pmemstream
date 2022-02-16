@@ -66,7 +66,7 @@ static inline const struct span_base *span_offset_to_span_ptr(const struct pmems
 	return (const struct span_base *)pmemstream_offset_to_ptr(data, offset);
 }
 
-static inline uint64_t pmemstream_next_timestamp(struct pmemstream* stream)
+static inline uint64_t pmemstream_next_timestamp(struct pmemstream *stream)
 {
 	return __atomic_fetch_add(&stream->next_timestamp, 1, __ATOMIC_RELAXED);
 }

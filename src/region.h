@@ -42,7 +42,8 @@ void region_runtimes_map_destroy(struct region_runtimes_map *map);
  *
  * Returned region_runtime might be in either read_ready or write_ready state.
  */
-int region_runtimes_map_get_or_create(struct region_runtimes_map *map, struct pmemstream_region region, struct span_region *span_region,
+int region_runtimes_map_get_or_create(struct region_runtimes_map *map, struct pmemstream_region region,
+				      struct span_region *span_region,
 				      struct pmemstream_region_runtime **container_handle);
 void region_runtimes_map_remove(struct region_runtimes_map *map, struct pmemstream_region region);
 
@@ -68,7 +69,7 @@ int region_runtime_initialize_for_write_locked(struct pmemstream *stream, struct
 					       struct pmemstream_region_runtime *region_runtime);
 
 void region_runtime_sync_timestamp(struct pmemstream *stream, struct pmemstream_region_runtime *region_runtime,
-		     struct pmemstream_entry entry, struct span_entry span_entry);
+				   uint64_t offset, uint64_t timestamp);
 
 #ifdef __cplusplus
 } /* end extern "C" */

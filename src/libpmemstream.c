@@ -287,8 +287,7 @@ int pmemstream_publish(struct pmemstream *stream, struct pmemstream_region regio
 		}
 	}
 
-	struct span_entry span_entry = {.span_base = span_base_create(size, SPAN_ENTRY),
-					.timestamp = 0};
+	struct span_entry span_entry = {.span_base = span_base_create(size, SPAN_ENTRY), .timestamp = 0};
 
 	uint8_t *destination = (uint8_t *)span_offset_to_span_ptr(&stream->data, reserved_entry->offset);
 	stream->data.memcpy(destination, &span_entry, sizeof(span_entry), PMEM2_F_MEM_NOFLUSH);
@@ -319,8 +318,7 @@ int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region
 		return ret;
 	}
 
-	struct span_entry span_entry = {.span_base = span_base_create(size, SPAN_ENTRY),
-					.timestamp = 0};
+	struct span_entry span_entry = {.span_base = span_base_create(size, SPAN_ENTRY), .timestamp = 0};
 
 	uint8_t *destination = (uint8_t *)span_offset_to_span_ptr(&stream->data, reserved_entry.offset);
 	stream->data.memcpy(destination, &span_entry, sizeof(span_entry), PMEM2_F_MEM_NOFLUSH);
@@ -336,11 +334,18 @@ int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region
 	return 0;
 }
 
+// XXX:
+// int pmemstream_sync_commited()
+// {
+// 	// consume commited_offset from mpmc_queue
+// }
+
 // XXX: possible variants:
 // - advance as far as possible and return persisted timestamp
 // - advance as far as possible and wait if nothing to do since last call (similar to waiting on iouring completion)
 // - advance to specified offset
-int pmemstream_sync(struct pmemstream *stream, struct pmemstream_region region, struct pmemstream_region_runtime *region_runtime)
+int pmemstream_sync_persistent(struct pmemstream *stream, struct pmemstream_region region,
+			       struct pmemstream_region_runtime *region_runtime)
 {
 	if (!region_runtime) {
 		int ret = pmemstream_region_runtime_initialize(stream, region, &region_runtime);
@@ -349,18 +354,57 @@ int pmemstream_sync(struct pmemstream *stream, struct pmemstream_region region, 
 		}
 	}
 
-	uint64_t commited_offset = region_runtime_get_committed_offset_acquire(region_runtime);
+	uint64_t committed_offset = region_runtime_get_committed_offset_acquire(region_runtime);
 	uint64_t persisted_offset = region_runtime_get_persisted_offset_acquire(region_runtime);
 
-	if (commited_offset == persisted_offset) {
+	if (committed_offset == persisted_offset) {
 		/* Nothing to do. */
 		return 0;
 	}
 
-	struct span_base *span_base = (struct span_base*) span_offset_to_span_ptr(&stream->data, )
+	// MUTEX_LOCK
+	// XXX1: instead of mutex use global mpmc_quque?
+	// XXX1: pmemstream_append/pmemstream_publish would call acquire to get timestamp
+	// XXX1: then it would call produce to mark timestamp as ready to consume
+	// XXX1: here, we would call consume on timestamp queue and saved the timestamp we get as persisted_timestamp
+	// XXX1: HOWEVER, this requires atomically acquiring offset AND timestamp (to avoid having entry with higher
+	// offset with lower timestamps)
+
+	// XXX2: we don't probably need mpmc_for timestamp - just having atomic next_timestamp and using CAS in mpmc_queue
+	// for offset will suffice. We can find out what is the highest "commited" timestamp by just getting commited_offset
+	// for the region, and reading timestamp from last commited entry - HOWEVER, this is problematic if there are a lot of regions
+	// ACTUALLY NO, WE CAN'T - this could result in the same problem as with XXX1 if we didn't update offset and timestmap
+	// atomically (even in single thread) for multiple regions
+
+	// IT"S best to have either:
+	// - concurrent append to single region + no timestamp (just store per-region persisted offset)
+	// - no concurrent append + global timestamp (no need for offset synchronization), here we can either use mpmc_queue or get timestamp on commit
+	// - concurrent_append + global timestamp (requires 2 mpmc_queue and atomic "double acquire"), might be slow when there are a lot of threads
+
+	// XXX3: using timestamp on commit:
+	// need to keep lock during setting timestamp for all entires
+	// this is because we need to block any other thread from setting larger timestamp to some other entires and commiting it.
+
+	assert(persisted_offset < committed_offset);
+
+	// XXX: the below code can be in different function or even removed - this is only to set hint offset
+	// while (persisted_offset < committed_offset) {
+	// 	struct span_entry *span_entry = (struct span_entry*) span_offset_to_span_ptr(&stream->data,
+	// persisted_offset);
+
+	// 	span_entry->timestamp = timestamp;
+	// 	stream->data.persist(&span_entry->timestamp, sizeof(span_entry->timestamp));
+	// 	// XXX: in span_entry->timestamp, we can have a pointer to runtime data where we set appropriate
+	// timestamp
+	// 	// but it's problematic for multiple threads (those pointers will be different)
+
+	// 	persisted_offset += span_get_total_size(&span_entry->span_base);
+	// }
+	// region_runtime_sync_timestamp(stream, region_runtime, )
+
+	// MUTEX_UNLOCK
 }
 
 uint64_t pmemstream_get_persisted_timestmap(struct pmemstream *stream)
 {
-
 }

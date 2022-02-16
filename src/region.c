@@ -200,7 +200,7 @@ void region_runtime_increase_committed_offset(struct pmemstream_region_runtime *
 }
 
 void region_runtime_sync_timestamp(struct pmemstream *stream, struct pmemstream_region_runtime *region_runtime,
-		     struct pmemstream_entry entry, struct span_entry span_entry)
+				   uint64_t offset, uint64_t timestamp)
 {
 	uint64_t persisted_offset_hint = entry.offset + span_get_total_size(&span_entry.base);
 	;

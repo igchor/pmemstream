@@ -60,7 +60,8 @@ int entry_iterator_initialize(struct pmemstream_entry_iterator *iterator, struct
 	assert(span_get_type(span_base) == SPAN_REGION);
 
 	struct pmemstream_region_runtime *region_rt;
-	int ret = region_runtimes_map_get_or_create(stream->region_runtimes_map, region, (struct span_region*) span_base, &region_rt);
+	int ret = region_runtimes_map_get_or_create(stream->region_runtimes_map, region,
+						    (struct span_region *)span_base, &region_rt);
 	if (ret) {
 		return ret;
 	}
