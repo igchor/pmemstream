@@ -60,7 +60,7 @@ int entry_iterator_initialize(struct pmemstream_entry_iterator *iterator, struct
 	assert(span_get_type(span_base) == SPAN_REGION);
 
 	struct pmemstream_region_runtime *region_rt;
-	int ret = region_runtimes_map_get_or_create(stream->region_runtimes_map, region, &region_rt);
+	int ret = region_runtimes_map_get_or_create(stream->region_runtimes_map, region, (struct span_region*) span_base, &region_rt);
 	if (ret) {
 		return ret;
 	}
@@ -100,8 +100,8 @@ err:
 static int validate_entry(const struct pmemstream *stream, struct pmemstream_entry entry)
 {
 	/* XXX: reading this span metadata is potentially dangerous. It might happen so that
-	 * before calling this function region_runtime is in UNINITIALIZED state but some other thread
-	 * changes it to CLEAR while span metadata is read. We might fix this using Optimistic Concurrency
+	 * before calling this function region_runtime is in READ_READY state but some other thread
+	 * changes it to WRITE_READY while span metadata is read. We might fix this using Optimistic Concurrency
 	 * Control (using region_runtime state). */
 	const struct span_base *span_base = span_offset_to_span_ptr(&stream->data, entry.offset);
 	if (span_get_type(span_base) != SPAN_ENTRY) {
@@ -109,8 +109,8 @@ static int validate_entry(const struct pmemstream *stream, struct pmemstream_ent
 	}
 
 	const struct span_entry *span_entry = (const struct span_entry *)span_base;
-	const void *entry_data = span_entry->data;
-	if (util_popcount_memory(entry_data, span_get_size(span_base)) == span_entry->popcount) {
+	if (span_entry->timestamp <= stream->header->persisted_timestamp) {
+		// XXX: keep copy of persisted_timestamp in DRAM?
 		return 0;
 	}
 	return -1;
@@ -126,8 +126,6 @@ static bool pmemstream_entry_iterator_offset_is_inside_region(struct pmemstream_
 /* Precondition: region_runtime is initialized. */
 static bool pmemstream_entry_iterator_offset_is_below_committed(struct pmemstream_entry_iterator *iterator)
 {
-	assert(region_runtime_get_state_acquire(iterator->region_runtime) != REGION_RUNTIME_STATE_UNINITIALIZED);
-
 	/* Make sure that we didn't go beyond committed entries. */
 	uint64_t committed_offset = region_runtime_get_committed_offset_acquire(iterator->region_runtime);
 	if (iterator->offset >= committed_offset) {
@@ -192,6 +190,7 @@ static int pmemstream_entry_iterator_next_when_region_not_initialized(struct pme
 }
 
 /* Advances entry iterator by one. Verifies entry integrity and initializes region runtime if end of data is found. */
+/* XXX: right now iterators return all commited entries. We should add possibility to read only persisted entries. */
 int pmemstream_entry_iterator_next(struct pmemstream_entry_iterator *iterator, struct pmemstream_region *region,
 				   struct pmemstream_entry *user_entry)
 {
@@ -203,7 +202,7 @@ int pmemstream_entry_iterator_next(struct pmemstream_entry_iterator *iterator, s
 		*region = iterator->region;
 	}
 
-	if (region_runtime_get_state_acquire(iterator->region_runtime) != REGION_RUNTIME_STATE_UNINITIALIZED) {
+	if (region_runtime_get_state_acquire(iterator->region_runtime) == REGION_RUNTIME_STATE_WRITE_READY) {
 		return pmemstream_entry_iterator_next_when_region_initialized(iterator);
 	}
 

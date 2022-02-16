@@ -40,13 +40,14 @@ struct span_base {
 
 struct span_region {
 	struct span_base span_base;
-	uint64_t padding[7]; /* XXX: CACHELINE_SIZE - sizeof(struct span_base) */
+	uint64_t persisted_offset_hint;
+	uint64_t padding[6]; /* XXX: CACHELINE_SIZE - sizeof(struct span_base) */
 	uint64_t data[];
 };
 
 struct span_entry {
 	struct span_base span_base;
-	uint64_t popcount;
+	uint64_t timestamp;
 	uint64_t data[];
 };
 

@@ -42,6 +42,7 @@ static void pmemstream_init(struct pmemstream *stream)
 
 	stream->header->stream_size = stream->stream_size;
 	stream->header->block_size = stream->block_size;
+	stream->header->persisted_timestamp = 0;
 	stream->data.persist(stream->header, sizeof(struct pmemstream_header));
 
 	stream->data.memcpy(stream->header->signature, PMEMSTREAM_SIGNATURE, strlen(PMEMSTREAM_SIGNATURE),
@@ -126,6 +127,8 @@ int pmemstream_from_map(struct pmemstream **stream, size_t block_size, struct pm
 	if (pmemstream_is_initialized(s) != 0) {
 		pmemstream_init(s);
 	}
+
+	s->next_timestamp = s->header->persisted_timestamp;
 
 	s->region_runtimes_map = region_runtimes_map_new();
 	if (!s->region_runtimes_map) {
@@ -225,7 +228,8 @@ size_t pmemstream_entry_length(struct pmemstream *stream, struct pmemstream_entr
 int pmemstream_region_runtime_initialize(struct pmemstream *stream, struct pmemstream_region region,
 					 struct pmemstream_region_runtime **region_runtime)
 {
-	int ret = region_runtimes_map_get_or_create(stream->region_runtimes_map, region, region_runtime);
+	struct span_region *span_region = (struct span_region *)span_offset_to_span_ptr(&stream->data, region.offset);
+	int ret = region_runtimes_map_get_or_create(stream->region_runtimes_map, region, span_region, region_runtime);
 	if (ret) {
 		return ret;
 	}
@@ -284,7 +288,7 @@ int pmemstream_publish(struct pmemstream *stream, struct pmemstream_region regio
 	}
 
 	struct span_entry span_entry = {.span_base = span_base_create(size, SPAN_ENTRY),
-					.popcount = util_popcount_memory(data, size)};
+					.timestamp = 0};
 
 	uint8_t *destination = (uint8_t *)span_offset_to_span_ptr(&stream->data, reserved_entry->offset);
 	stream->data.memcpy(destination, &span_entry, sizeof(span_entry), PMEM2_F_MEM_NOFLUSH);
@@ -316,7 +320,7 @@ int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region
 	}
 
 	struct span_entry span_entry = {.span_base = span_base_create(size, SPAN_ENTRY),
-					.popcount = util_popcount_memory(data, size)};
+					.timestamp = 0};
 
 	uint8_t *destination = (uint8_t *)span_offset_to_span_ptr(&stream->data, reserved_entry.offset);
 	stream->data.memcpy(destination, &span_entry, sizeof(span_entry), PMEM2_F_MEM_NOFLUSH);
@@ -330,4 +334,33 @@ int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region
 	}
 
 	return 0;
+}
+
+// XXX: possible variants:
+// - advance as far as possible and return persisted timestamp
+// - advance as far as possible and wait if nothing to do since last call (similar to waiting on iouring completion)
+// - advance to specified offset
+int pmemstream_sync(struct pmemstream *stream, struct pmemstream_region region, struct pmemstream_region_runtime *region_runtime)
+{
+	if (!region_runtime) {
+		int ret = pmemstream_region_runtime_initialize(stream, region, &region_runtime);
+		if (ret) {
+			return ret;
+		}
+	}
+
+	uint64_t commited_offset = region_runtime_get_committed_offset_acquire(region_runtime);
+	uint64_t persisted_offset = region_runtime_get_persisted_offset_acquire(region_runtime);
+
+	if (commited_offset == persisted_offset) {
+		/* Nothing to do. */
+		return 0;
+	}
+
+	struct span_base *span_base = (struct span_base*) span_offset_to_span_ptr(&stream->data, )
+}
+
+uint64_t pmemstream_get_persisted_timestmap(struct pmemstream *stream)
+{
+
 }

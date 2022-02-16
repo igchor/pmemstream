@@ -24,6 +24,7 @@ struct pmemstream_header {
 	char signature[PMEMSTREAM_SIGNATURE_SIZE];
 	uint64_t stream_size;
 	uint64_t block_size;
+	uint64_t persisted_timestamp;
 };
 
 struct pmemstream_data_runtime {
@@ -47,6 +48,8 @@ struct pmemstream {
 	size_t usable_size;
 	size_t block_size;
 
+	uint64_t next_timestamp;
+
 	struct region_runtimes_map *region_runtimes_map;
 };
 
@@ -61,6 +64,11 @@ static inline const struct span_base *span_offset_to_span_ptr(const struct pmems
 {
 	assert(offset % sizeof(struct span_base) == 0);
 	return (const struct span_base *)pmemstream_offset_to_ptr(data, offset);
+}
+
+static inline uint64_t pmemstream_next_timestamp(struct pmemstream* stream)
+{
+	return __atomic_fetch_add(&stream->next_timestamp, 1, __ATOMIC_RELAXED);
 }
 
 #ifdef __cplusplus
