@@ -248,8 +248,6 @@ static void region_runtime_clear_from_tail(struct pmemstream *stream, struct pme
 
 		uint8_t *destination = (uint8_t *)span_offset_to_span_ptr(&stream->data, append_offset);
 		stream->data.memcpy(destination, &span_empty, sizeof(span_empty), PMEM2_F_MEM_NOFLUSH);
-		stream->data.memset(destination + sizeof(span_empty), 0, remaining_size - sizeof(span_empty),
-				    PMEM2_F_MEM_NONTEMPORAL | PMEM2_F_MEM_NODRAIN);
 		stream->data.persist(destination, sizeof(span_empty));
 	}
 
