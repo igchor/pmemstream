@@ -323,16 +323,49 @@ int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region
 
 	uint8_t *destination = (uint8_t *)span_offset_to_span_ptr(&stream->data, reserved_entry.offset);
 
-	if (((uintptr_t)(destination)) % 64 == 0) {
+	if (size < 48) {
+		stream->data.memcpy(destination, &span_entry, sizeof(span_entry), PMEM2_F_MEM_NOFLUSH);
+		stream->data.memcpy(destination + sizeof(span_entry), data, size, PMEM2_F_MEM_NOFLUSH);
+		stream->data.persist(destination, sizeof(span_entry) + size);
+	} else if (((uintptr_t)(destination)) % 64 == 0) {
 		uint64_t buffer[8];
 		memcpy(buffer, &span_entry, sizeof(span_entry));
-		memcpy(buffer + 2, data, 64 - 16);
+		memcpy(buffer + 2, data, 48);
 
 		stream->data.memcpy(destination, buffer, 64, PMEM2_F_MEM_NONTEMPORAL | PMEM2_F_MEM_NODRAIN);
-		stream->data.memcpy(destination + 64, data, size - 48, PMEM2_F_MEM_NONTEMPORAL);
+		stream->data.memcpy(destination + 64, (char*)data + 48, size - 48, PMEM2_F_MEM_NONTEMPORAL);
 	} else {
-		abort();
+		size_t remaining_to_cacheline = 64 - ((uintptr_t)(destination)) % 64;
+		if (remaining_to_cacheline < 16) {
+			*((uint64_t*)destination) = span_entry.span_base.size_and_type;
+			stream->data.flush(destination, 8);
+
+			if (size < 56) {
+				*(((uint64_t*)destination) + 1) = span_entry.popcount;
+				stream->data.memcpy(destination + 16, data, size, 0);
+			} else {
+				uint64_t buffer[8];
+				buffer[0] = span_entry.popcount;
+				memcpy(buffer + 1, data, 56);
+				stream->data.memcpy(destination + 8, buffer, 64, PMEM2_F_MEM_NONTEMPORAL | PMEM2_F_MEM_NODRAIN);
+
+				if (size > 56) {
+					stream->data.memcpy(destination + 64 + 8, (char*)data + 56, size - 56, PMEM2_F_MEM_NONTEMPORAL | PMEM2_F_MEM_NODRAIN);		
+				}
+
+				stream->data.drain();
+			}
+		} else {
+			uint64_t buffer[8];
+			memcpy(buffer, &span_entry, sizeof(span_entry));
+			memcpy(buffer + 2, data, remaining_to_cacheline - 16);
+
+			stream->data.memcpy(destination, buffer, remaining_to_cacheline, PMEM2_F_MEM_NONTEMPORAL | PMEM2_F_MEM_NODRAIN);
+			stream->data.memcpy(destination + remaining_to_cacheline, (char*)data + (remaining_to_cacheline - 16), size - (remaining_to_cacheline - 16), PMEM2_F_MEM_NONTEMPORAL);
+		}
 	}
+
+	assert(memcmp(destination + 16, data, size) == 0);
 
 	region_runtime_increase_committed_offset(region_runtime, pmemstream_entry_total_size_aligned(size));
 
