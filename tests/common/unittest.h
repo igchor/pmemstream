@@ -6,6 +6,7 @@
 
 #include "libpmemstream.h"
 #include "test_backtrace.h"
+#include "valgrind_internal.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -50,7 +51,11 @@ extern "C" {
 #endif
 
 /* XXX: refactor to use __start (https://stackoverflow.com/questions/15919356/c-program-start) */
-#define START() test_register_sighandlers()
+#define START()                                                                                                        \
+	do {                                                                                                           \
+		test_register_sighandlers();                                                                           \
+		set_valgrind_internals();                                                                              \
+	} while (0)
 
 /* XXX: provide function to get the actual metadata overhead */
 #define STREAM_METADATA_SIZE (16UL * 1024)

@@ -44,6 +44,7 @@ add_cppstyle(tests ${TESTS_ROOT_DIR}/*/*.[ch]
 add_check_whitespace(tests ${TESTS_ROOT_DIR}/*.*
 		${CMAKE_CURRENT_SOURCE_DIR}/*/*.*)
 
+add_library(valgrind_internal STATIC common/valgrind_internal.c)
 add_library(test_backtrace STATIC common/test_backtrace.c)
 if(LIBUNWIND_FOUND)
 	target_compile_definitions(test_backtrace PUBLIC USE_LIBUNWIND=1)

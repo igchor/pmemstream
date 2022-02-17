@@ -64,7 +64,8 @@ bool all_equal(const R &r)
 
 static inline int run_test(std::function<void()> test)
 {
-	test_register_sighandlers();
+	// START();
+	set_valgrind_internals();
 
 	try {
 		test();
