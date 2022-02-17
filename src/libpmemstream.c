@@ -337,14 +337,12 @@ int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region
 	} else {
 		size_t remaining_to_cacheline = 64 - ((uintptr_t)(destination)) % 64;
 		if (remaining_to_cacheline < 16) {
-			*((uint64_t*)destination) = span_entry.span_base.size_and_type;
-
 			if (size < 56) {
-				*(((uint64_t*)destination) + 1) = span_entry.popcount;
+				stream->data.memcpy(destination, &span_entry, 16, PMEM2_F_MEM_NOFLUSH);
 				stream->data.memcpy(destination + 16, data, size, PMEM2_F_MEM_NOFLUSH);
 				stream->data.persist(destination, size + 16);
 			} else {
-				stream->data.flush(destination, 8);
+				stream->data.memcpy(destination, &span_entry, 8, PMEM2_F_MEM_NOFLUSH);
 				uint64_t buffer[8];
 				buffer[0] = span_entry.popcount;
 				memcpy(buffer + 1, data, 56);
