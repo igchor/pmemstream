@@ -5,8 +5,11 @@
 
 namespace
 {
-static constexpr unsigned max_concurrency = 128;
-static constexpr unsigned max_size = 128;
+
+static unsigned max_concurrency = 128;
+static unsigned max_size = 128;
+static unsigned max_success = 100;
+
 static constexpr size_t max_queue_size = UINT64_MAX - 1;
 
 /* Holds vector of results from consume operations. */
@@ -137,7 +140,12 @@ int main(int argc, char *argv[])
 	return run_test([&] {
 		return_check ret;
 
-		std::string rapidcheck_config = "noshrink=1 max_size=" + std::to_string(max_size);
+		if (On_valgrind) {
+			max_concurrency = 4;
+			max_success = 2;
+		}
+		std::string rapidcheck_config = "noshrink=1 max_size=" + std::to_string(max_size) + " max_success=" + std::to_string(max_success);
+
 		env_setter setter("RC_PARAMS", rapidcheck_config, false);
 
 		ret += rc::check("verify if multiple consumers, single producer scenario works", spmc_test);
