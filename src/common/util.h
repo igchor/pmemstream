@@ -22,6 +22,8 @@ static inline unsigned char util_popcount64(uint64_t value)
 
 static inline size_t util_popcount_memory(const uint8_t *data, size_t size)
 {
+	return 0;
+
 	size_t count = 0;
 	size_t i = 0;
 
