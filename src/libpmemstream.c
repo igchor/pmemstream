@@ -11,6 +11,7 @@
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdalign.h>
 
 static int pmemstream_is_initialized(struct pmemstream *stream)
 {
@@ -328,7 +329,7 @@ int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region
 		stream->data.memcpy(destination + sizeof(span_entry), data, size, PMEM2_F_MEM_NOFLUSH);
 		stream->data.persist(destination, sizeof(span_entry) + size);
 	} else if (((uintptr_t)(destination)) % 64 == 0) {
-		uint64_t buffer[8];
+		alignas(64) uint64_t buffer[8];
 		memcpy(buffer, &span_entry, sizeof(span_entry));
 		memcpy(buffer + 2, data, 48);
 
@@ -342,25 +343,31 @@ int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region
 				stream->data.memcpy(destination + 16, data, size, PMEM2_F_MEM_NOFLUSH);
 				stream->data.persist(destination, size + 16);
 			} else {
-				stream->data.memcpy(destination, &span_entry, 8, PMEM2_F_MEM_NOFLUSH);
-				uint64_t buffer[8];
+				stream->data.memcpy(destination, &span_entry, 8, PMEM2_F_MEM_NODRAIN);
+				alignas(64) uint64_t buffer[8];
 				buffer[0] = span_entry.popcount;
 				memcpy(buffer + 1, data, 56);
 				stream->data.memcpy(destination + 8, buffer, 64, PMEM2_F_MEM_NONTEMPORAL | PMEM2_F_MEM_NODRAIN);
 
 				if (size > 56) {
-					stream->data.memcpy(destination + 64 + 8, (char*)data + 56, size - 56, PMEM2_F_MEM_NONTEMPORAL | PMEM2_F_MEM_NODRAIN);		
+					if (size - 56 > 64)
+						stream->data.memcpy(destination + 64 + 8, (char*)data + 56, size - 56, PMEM2_F_MEM_NONTEMPORAL | PMEM2_F_MEM_NODRAIN);
+					else
+						stream->data.memcpy(destination + 64 + 8, (char*)data + 56, size - 56, PMEM2_F_MEM_NODRAIN);
 				}
 
 				stream->data.drain();
 			}
 		} else {
-			uint64_t buffer[8];
-			memcpy(buffer, &span_entry, sizeof(span_entry));
-			memcpy(buffer + 2, data, remaining_to_cacheline - 16);
+			if (remaining_to_cacheline == 16)
+				stream->data.memcpy(destination, &span_entry, sizeof(span_entry), PMEM2_F_MEM_NODRAIN);
+			else
+				stream->data.memcpy(destination, &span_entry, sizeof(span_entry), PMEM2_F_MEM_NOFLUSH);
 
-			stream->data.memcpy(destination, buffer, remaining_to_cacheline, PMEM2_F_MEM_NONTEMPORAL | PMEM2_F_MEM_NODRAIN);
-			stream->data.memcpy(destination + remaining_to_cacheline, (char*)data + (remaining_to_cacheline - 16), size - (remaining_to_cacheline - 16), PMEM2_F_MEM_NONTEMPORAL);
+			if (size - remaining_to_cacheline < 64)
+				stream->data.memcpy(destination + 16, data, size, 0);
+			else
+				stream->data.memcpy(destination + 16, data, size, PMEM2_F_MEM_NONTEMPORAL); // it should flush destination
 		}
 	}
 
