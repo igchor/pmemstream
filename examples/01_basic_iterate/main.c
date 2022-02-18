@@ -1,120 +1,82 @@
-// SPDX-License-Identifier: BSD-3-Clause
-/* Copyright 2021-2022, Intel Corporation */
 
-#include "examples_helpers.h"
-#include "libpmemstream.h"
-
-#include <libpmem2.h>
-#include <stdio.h>
-
-struct data_entry {
-	uint64_t data;
+struct pmemstream_append_ret {
+	int error;
+	struct future_commited commited;
+	struct future_persisted persisted;
 };
 
-/**
- * This example creates a stream from map2 source, prints its content,
- * and appends monotonically increasing values at the end.
- *
- * It creates a file at given path, with size = EXAMPLE_STREAM_SIZE.
- */
+struct pmemstream_append_ret pmemstream_append(struct pmemstream *stream, struct pmemstream_region region,
+		      struct pmemstream_region_runtime *region_runtime, const void *data, size_t size);
+
+uint64_t pmemstream_sync(struct pmemstream *stream, uint64_t offset);
+
+
 int main(int argc, char *argv[])
 {
-	if (argc != 2) {
-		printf("Usage: %s file\n", argv[0]);
-		return -1;
-	}
+	// BG THREAD
+	std::thread bg([&]{
+		while (true) {
+			// Accept offset to which data should be persisted (or MAX_OFFSET for persisting as much as possible)
+			// Can have blocking semantic similar to io_uring_wait_cqe or non-blocking like io_uring_peek_cqe
+			uint64_t persisted_offset = pmemstream_sync(stream, MAX_OFFSET);
+			user_provided_callback(persisted_offset);
 
-	struct pmem2_map *map = example_map_open(argv[1], EXAMPLE_STREAM_SIZE);
-	if (map == NULL) {
-		pmem2_perror("pmem2_map");
-		return -1;
-	}
+			sleep(...);
+		}
+	});
 
-	struct pmemstream *stream;
-	int ret = pmemstream_from_map(&stream, 4096, map);
-	if (ret == -1) {
-		fprintf(stderr, "pmemstream_from_map failed\n");
-		return ret;
-	}
+	// USER THREAD
+	struct pmemstream_append_ret rets[3];
+	
+	ret[0] = pmemstream_append(stream, region, NULL, data, size);
+	ret[1] = pmemstream_append(stream, region, NULL, data, size);
+	ret[2] = pmemstream_append(stream, region, NULL, data, size);
 
-	struct pmemstream_region_iterator *riter;
-	ret = pmemstream_region_iterator_new(&riter, stream);
-	if (ret == -1) {
-		fprintf(stderr, "pmemstream_region_iterator_new failed\n");
-		return ret;
-	}
-
-	struct pmemstream_region region;
-
-	/* Iterate over all regions. */
-	while (pmemstream_region_iterator_next(riter, &region) == 0) {
-		struct pmemstream_entry entry;
-		struct pmemstream_entry_iterator *eiter;
-		ret = pmemstream_entry_iterator_new(&eiter, stream, region);
-		if (ret == -1) {
-			fprintf(stderr, "pmemstream_entry_iterator_new failed\n");
-			return ret;
+	size_t completed = 0;
+	while (completed != 3) {
+		for (int i = 0; i < 3; i++) {
+			// future_poll can just read the status of operation (which happens in background) and only update DRAM metadata
+			// or it can help with making progress (help with persisting). This can be configurable.
+			if (future_poll(ret[i].persisted) == COMPLETED) {
+				completed++;
+			}
 		}
 
-		/* Iterate over all elements in a region and save last entry value. */
-		uint64_t last_entry_data;
-		while (pmemstream_entry_iterator_next(eiter, NULL, &entry) == 0) {
-			const struct data_entry *d = pmemstream_entry_data(stream, entry);
-			printf("data entry %lu: %lu in region %lu\n", entry.offset, d->data, region.offset);
-			last_entry_data = d->data;
-		}
-		pmemstream_entry_iterator_delete(&eiter);
-
-		struct data_entry e;
-		e.data = last_entry_data + 1;
-		struct pmemstream_entry new_entry;
-		ret = pmemstream_append(stream, region, NULL, &e, sizeof(e), &new_entry);
-		if (ret == -1) {
-			fprintf(stderr, "pmemstream_append failed\n");
-			return ret;
-		}
+		// APPLICATION CODE
 	}
+}
 
-	pmemstream_region_iterator_delete(&riter);
+// Extra info: chaining operatations for hardware accelerators
+// When accelerator (e,g, DSA) is used we need to chain operations which are going to be executed on
+// accelerator with the ones which need to be executed on CPU. E.g. append for DSA will return future which
+// looks like this:
+// FUTURE {
+//		DSA_MEMCPY;
+// 		PMEMSTREAM_INTERNAL_COMMIT;
+//		PMEMSTREAM_INTERNAL_MAKE_PERSISTENT;
+// }
+// future_poll() for DSA_MEMCPY reads status flag to check when operation completes, after that PMEMSTREAM_INTERNAL_COMMIT is started
+// future_poll() for PMEMSTREAM_INTERNAL_COMMIT actually exectues the function on CPU (mark the append as commited)
+// future_poll() for PMEMSTREAM_INTERNAL_MAKE_PERSISTENT can either wait for data to become persistent (rely on BG thread calling pmemstream_sync)
+//					 or it can also call pmemstream_sync itself).
 
-	/* Allocate new region and append single entry to it. */
-	struct pmemstream_region new_region;
-	ret = pmemstream_region_allocate(stream, 4096, &new_region);
-	if (ret != -1) {
-		struct data_entry e;
-		e.data = 1;
-		struct pmemstream_entry new_entry;
 
-		struct pmemstream_entry_iterator *eiter;
-		ret = pmemstream_entry_iterator_new(&eiter, stream, new_region);
-		if (ret == -1) {
-			fprintf(stderr, "pmemstream_entry_iterator_new failed\n");
-			return ret;
-		}
-		pmemstream_entry_iterator_delete(&eiter);
+////////////// TIMESTAMPS ////////////////////////////////////////
 
-		ret = pmemstream_append(stream, new_region, NULL, &e, sizeof(e), &new_entry);
-		if (ret == -1) {
-			fprintf(stderr, "pmemstream_append failed\n");
-			return ret;
-		}
+struct pmemstream_append_ret {
+	...
+	uint64_t timestamp;
+};
 
-		const struct data_entry *new_data_entry = pmemstream_entry_data(stream, new_entry);
-		printf("new_data_entry: %lu\n", new_data_entry->data);
+{
+	ret[0] = pmemstream_append(stream, region1, NULL, data, size);
+	ret[1] = pmemstream_append(stream, region2, NULL, data, size);
+	ret[2] = pmemstream_append(stream, region3, NULL, data, size);
 
-		e.data++;
-		ret = pmemstream_append(stream, new_region, NULL, &e, sizeof(e), &new_entry);
-		if (ret == -1) {
-			fprintf(stderr, "pmemstream_append failed\n");
-			return ret;
-		}
+	...
 
-		new_data_entry = pmemstream_entry_data(stream, new_entry);
-		printf("new_data_entry: %lu\n", new_data_entry->data);
+	auto max_timestamp = std::max(ret[0].timestamp, ret[1].timestamp, ret[2].timestamp);
+	if (pmemstream_persisted_offset(stream) >= max_timestamp) {
+		// all operations completed
 	}
-
-	pmemstream_delete(&stream);
-	pmem2_map_delete(&map);
-
-	return 0;
 }
