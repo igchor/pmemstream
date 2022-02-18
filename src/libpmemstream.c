@@ -334,15 +334,7 @@ int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region
 		memcpy(buffer + 2, data, 48);
 
 		stream->data.memcpy(destination, buffer, 64, PMEM2_F_MEM_NONTEMPORAL | PMEM2_F_MEM_NODRAIN);
-
-		if ((size - 48) % 64 == 0) {
-			stream->data.memcpy(destination + 64, (char*)data + 48, size - 48, PMEM2_F_MEM_NONTEMPORAL);
-		} else {
-			size_t aligned_down = ALIGN_DOWN(size - 48, 64ULL);
-			if (aligned_down != 0)
-				stream->data.memcpy(destination + 64, (char*)data + 48, aligned_down, PMEM2_F_MEM_NONTEMPORAL | PMEM2_F_MEM_NODRAIN);
-			stream->data.memcpy(destination + 64 + aligned_down, (char*)data + 48 + aligned_down, size - 48 - aligned_down, 0);
-		}
+		stream->data.memcpy(destination + 64, (char*)data + 48, size - 48, 0);
 	} else {
 		size_t remaining_to_cacheline = 64 - ((uintptr_t)(destination)) % 64;
 		if (remaining_to_cacheline < 16) {
@@ -376,28 +368,7 @@ int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region
 			else
 				stream->data.memcpy(destination, &span_entry, sizeof(span_entry), PMEM2_F_MEM_NOFLUSH);
 
-			if ((size - (remaining_to_cacheline - 16)) % 64 == 0) {
-				if (remaining_to_cacheline > 16) {
-					stream->data.memcpy(destination + 16, data, remaining_to_cacheline - 16, PMEM2_F_MEM_NODRAIN);
-					stream->data.memcpy(destination + remaining_to_cacheline, (char*)data + remaining_to_cacheline - 16, size - (remaining_to_cacheline - 16), PMEM2_F_MEM_NONTEMPORAL);
-				} else { // == 16
-					stream->data.memcpy(destination + 16, data, size, PMEM2_F_MEM_NONTEMPORAL);
-				}
-			} else {
-				if (remaining_to_cacheline > 16) {
-					stream->data.memcpy(destination + 16, data, remaining_to_cacheline - 16, PMEM2_F_MEM_NODRAIN);
-
-					size_t aligned_down = ALIGN_DOWN(size - (remaining_to_cacheline - 16), 64ULL);
-					if (aligned_down != 0)
-						stream->data.memcpy(destination + remaining_to_cacheline, data + remaining_to_cacheline - 16, aligned_down, PMEM2_F_MEM_NONTEMPORAL | PMEM2_F_MEM_NODRAIN);
-					stream->data.memcpy(destination + remaining_to_cacheline + aligned_down, (char*) data + remaining_to_cacheline - 16 + aligned_down, size - (remaining_to_cacheline - 16) - aligned_down, 0);
-				} else { // == 16
-					size_t aligned_down = ALIGN_DOWN(size, 64ULL);
-					if (aligned_down != 0)
-						stream->data.memcpy(destination + 16, data, aligned_down, PMEM2_F_MEM_NONTEMPORAL | PMEM2_F_MEM_NODRAIN);
-					stream->data.memcpy(destination + 16 + aligned_down, (char*) data + aligned_down, size - aligned_down, 0);
-				}
-			}
+			stream->data.memcpy(destination + 16, (char*)data, size, 0);
 		}
 	}
 
