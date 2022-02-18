@@ -37,8 +37,6 @@ static void pmemstream_init(struct pmemstream *stream)
 
 	uint8_t *destination = (uint8_t *)span_offset_to_span_ptr(&stream->data, 0);
 	stream->data.memcpy(destination, &span_empty, sizeof(span_empty), PMEM2_F_MEM_NODRAIN);
-	stream->data.memset(destination + sizeof(span_empty), 0, empty_size,
-			    PMEM2_F_MEM_NONTEMPORAL | PMEM2_F_MEM_NODRAIN);
 
 	stream->header->stream_size = stream->stream_size;
 	stream->header->block_size = stream->block_size;
@@ -46,6 +44,12 @@ static void pmemstream_init(struct pmemstream *stream)
 
 	stream->data.memcpy(stream->header->signature, PMEMSTREAM_SIGNATURE, strlen(PMEMSTREAM_SIGNATURE),
 			    PMEM2_F_MEM_NONTEMPORAL);
+
+	volatile char *cur_addr = destination;
+	char *addr_end = (char *)cur_addr + empty_size;
+	for (; cur_addr < addr_end; cur_addr += 4096) {
+		*cur_addr = *cur_addr;
+	}
 }
 
 static size_t pmemstream_header_size_aligned(size_t block_size)
@@ -204,7 +208,6 @@ int pmemstream_region_free(struct pmemstream *stream, struct pmemstream_region r
 	size_t empty_size = stream->usable_size - sizeof(struct span_empty);
 	struct span_empty span_empty = {.span_base = span_base_create(empty_size, SPAN_EMPTY)};
 	stream->data.memcpy(destination, &span_empty, sizeof(span_empty), PMEM2_F_MEM_NODRAIN);
-	stream->data.memset(destination + sizeof(span_empty), 0, empty_size, PMEM2_F_MEM_NONTEMPORAL);
 
 	region_runtimes_map_remove(stream->region_runtimes_map, region);
 
