@@ -10,6 +10,7 @@
 #include <map>
 #include <string>
 #include <tuple>
+#include <type_traits>
 #include <vector>
 
 #include "unittest.hpp"
@@ -242,16 +243,26 @@ struct pmemstream_sut {
 			return result;
 		}
 
-		/* XXX: extend to allow more than one extra_data vector */
-		void verify(pmemstream_region region, const std::vector<std::string> &data,
-			    const std::vector<std::string> &extra_data)
+		template <typename... Args>
+		void verify(pmemstream_region region, const Args &... args)
 		{
-			/* Verify if stream now holds data + extra_data */
-			auto all_elements = get_elements_in_region(region);
-			auto extra_data_start = all_elements.begin() + static_cast<int>(data.size());
+			// static_assert(std::is_same_v<std::vector<std::string>>, std::common_type_t<Args...>>);
+			auto arguments = variadic_args_to_vector_of_pointers(args...);
 
-			UT_ASSERT(std::equal(all_elements.begin(), extra_data_start, data.begin()));
-			UT_ASSERT(std::equal(extra_data_start, all_elements.end(), extra_data.begin()));
+			size_t total_size = 0;
+			for (auto ptr : arguments) {
+				total_size += ptr->size();
+			}
+
+			auto all_elements = get_elements_in_region(region);
+			UT_ASSERTeq(total_size, all_elements.size());
+
+			size_t offset = 0;
+			for (auto ptr : arguments) {
+				size_t size = ptr->size();
+				UT_ASSERT(std::equal(all_elements.begin() + offset, all_elements.begin() + size,
+						     ptr->begin()));
+			}
 		}
 
 		pmemstream_sut &s;

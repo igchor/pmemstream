@@ -93,7 +93,7 @@ struct rc_verify_command : public pmemstream_command {
 	void run(const pmemstream_model &m, pmemstream_sut &s) const override
 	{
 		for (auto data : m.regions) {
-			s.helpers.verify(pmemstream_region{data.first}, {data.second}, {});
+			s.helpers.verify(pmemstream_region{data.first}, std::vector<std::string>{data.second});
 		}
 	}
 };

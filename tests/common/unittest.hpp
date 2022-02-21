@@ -56,6 +56,22 @@ bool all_of(const R &r, Pred &&pred)
 	return std::all_of(r.begin(), r.end(), std::forward<Pred>(pred));
 }
 
+template <typename Tuple>
+auto tuple_to_vector_of_pointers(Tuple &&tuple)
+{
+	return std::apply(
+		[](auto &&... elements) {
+			return std::vector({std::addressof(std::forward<decltype(elements)>(elements))...});
+		},
+		std::forward<Tuple>(tuple));
+}
+
+template <typename... Args>
+auto variadic_args_to_vector_of_pointers(const Args &... args)
+{
+	return tuple_to_vector_of_pointers(std::tie(args...));
+}
+
 template <typename R>
 bool all_equal(const R &r)
 {

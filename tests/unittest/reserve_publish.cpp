@@ -33,7 +33,7 @@ int main(int argc, char *argv[])
 					 pmemstream_sut stream(path, TEST_DEFAULT_BLOCK_SIZE, TEST_DEFAULT_STREAM_SIZE);
 					 auto region = stream.helpers.initialize_single_region(TEST_DEFAULT_REGION_SIZE,
 											       data);
-					 stream.helpers.verify(region, data, {});
+					 stream.helpers.verify(region, data);
 
 					 if (use_append) {
 						 stream.helpers.append(region, extra_data);
@@ -64,7 +64,7 @@ int main(int argc, char *argv[])
 					pmemstream_sut stream(path, TEST_DEFAULT_BLOCK_SIZE, TEST_DEFAULT_STREAM_SIZE);
 					auto region =
 						stream.helpers.initialize_single_region(TEST_DEFAULT_REGION_SIZE, data);
-					stream.helpers.verify(region, data, {});
+					stream.helpers.verify(region, data);
 					a_data = stream.helpers.get_elements_in_region(region);
 
 					UT_ASSERTeq(stream.region_free(region), 0);
@@ -100,11 +100,11 @@ int main(int argc, char *argv[])
 
 					 std::memcpy(reinterpret_cast<char *>(reserved_data), extra_entry.data(),
 						     extra_entry.size());
-					 stream.helpers.verify(region, data, {});
+					 stream.helpers.verify(region, data);
 
 					 stream.reopen();
 
-					 stream.helpers.verify(region, data, {});
+					 stream.helpers.verify(region, data);
 				 });
 	});
 }

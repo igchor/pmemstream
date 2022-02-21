@@ -58,7 +58,7 @@ int main(int argc, char *argv[])
 
 			pmemstream_sut stream(path, TEST_DEFAULT_BLOCK_SIZE, TEST_DEFAULT_STREAM_SIZE);
 			auto region = stream.helpers.initialize_single_region(region_size, data);
-			stream.helpers.verify(region, data, {});
+			stream.helpers.verify(region, data);
 
 			UT_ASSERTeq(stream.region_free(region), 0);
 		});
@@ -68,7 +68,7 @@ int main(int argc, char *argv[])
 					 pmemstream_sut stream(path, TEST_DEFAULT_BLOCK_SIZE, TEST_DEFAULT_STREAM_SIZE);
 					 auto region = stream.helpers.initialize_single_region(TEST_DEFAULT_REGION_SIZE,
 											       data);
-					 stream.helpers.verify(region, data, {});
+					 stream.helpers.verify(region, data);
 
 					 auto riter = stream.region_iterator();
 
@@ -104,7 +104,7 @@ int main(int argc, char *argv[])
 			pmemstream_sut stream(path, TEST_DEFAULT_BLOCK_SIZE, stream_size);
 			/* and initialize this stream with a single region of */
 			auto region = stream.helpers.initialize_single_region(region_size, {});
-			stream.helpers.verify(region, {}, {});
+			stream.helpers.verify(region, std::vector<std::string>{});
 
 			UT_ASSERTeq(stream.region_free(region), 0);
 		});
@@ -114,7 +114,7 @@ int main(int argc, char *argv[])
 			pmemstream_sut stream(path, block_size, TEST_DEFAULT_STREAM_SIZE);
 			/* and initialize this stream with a single region of */
 			auto region = stream.helpers.initialize_single_region(region_size, {});
-			stream.helpers.verify(region, {}, {});
+			stream.helpers.verify(region, std::vector<std::string>{});
 		});
 
 		ret += rc::check("verify if a region has expected size", [&]() {

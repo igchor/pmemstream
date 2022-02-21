@@ -69,7 +69,7 @@ int main(int argc, char *argv[])
 							stream.region_runtime_initialize(region);
 						}
 						stream.helpers.append(region, extra_data);
-						stream.helpers.verify(region, extra_data, {});
+						stream.helpers.verify(region, extra_data);
 					} else {
 						/* iterators */
 						concurrent_iterate_verify(stream, region, extra_data, {});

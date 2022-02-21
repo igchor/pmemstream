@@ -29,7 +29,7 @@ int main(int argc, char *argv[])
 					 if (reopen)
 						 stream.sut.reopen();
 
-					 stream.sut.helpers.verify(region, data, {});
+					 stream.sut.helpers.verify(region, data);
 					 stream.sut.helpers.append(region, extra_data);
 					 stream.sut.helpers.verify(region, data, extra_data);
 				 });
@@ -37,7 +37,7 @@ int main(int argc, char *argv[])
 		/* Verify if empty region does not return any data. */
 		{
 			pmemstream_with_single_empty_region stream;
-			stream.sut.helpers.verify(stream.sut.helpers.get_first_region(), {}, {});
+			stream.sut.helpers.verify(stream.sut.helpers.get_first_region(), std::vector<std::string>{});
 		}
 
 		/* verify if an entry of size = 0 can be appended */
@@ -48,7 +48,7 @@ int main(int argc, char *argv[])
 			std::string entry;
 			auto [ret, new_entry] = stream.sut.append(region, entry);
 			UT_ASSERTeq(ret, 0);
-			stream.sut.helpers.verify(region, {entry}, {});
+			stream.sut.helpers.verify(region, {entry});
 		}
 
 		/* and entry with size > region's size cannot be appended */
@@ -73,7 +73,7 @@ int main(int argc, char *argv[])
 				auto [ret, new_entry] =
 					stream.sut.append(region, std::string_view(invalid_data_ptr, 0));
 				UT_ASSERTeq(ret, 0);
-				stream.sut.helpers.verify(region, {entry}, {});
+				stream.sut.helpers.verify(region, {entry});
 			});
 
 		ret += rc::check("verify if sequence of append and reopen commands leads to consitent state", [] {

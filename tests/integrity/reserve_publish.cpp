@@ -31,7 +31,7 @@ int main(int argc, char *argv[])
 					 pmemstream_sut stream(path, TEST_DEFAULT_BLOCK_SIZE, TEST_DEFAULT_STREAM_SIZE);
 					 auto region = stream.helpers.initialize_single_region(TEST_DEFAULT_REGION_SIZE,
 											       data);
-					 stream.helpers.verify(region, data, {});
+					 stream.helpers.verify(region, data);
 
 					 if (!is_runtime_initialized)
 						 stream.region_runtime_initialize(region);
