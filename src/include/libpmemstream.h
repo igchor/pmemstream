@@ -89,6 +89,10 @@ int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region
 		      struct pmemstream_region_runtime *region_runtime, const void *data, size_t size,
 		      struct pmemstream_entry *new_entry);
 
+/* Stores offset of last commited entry durably on persistent media. */
+void pmemstream_sync(struct pmemstream *stream, struct pmemstream_region region,
+		     struct pmemstream_region_runtime *region_runtime);
+
 // returns pointer to the data of the entry
 const void *pmemstream_entry_data(struct pmemstream *stream, struct pmemstream_entry entry);
 

@@ -37,8 +37,6 @@ static void pmemstream_init(struct pmemstream *stream)
 
 	uint8_t *destination = (uint8_t *)span_offset_to_span_ptr(&stream->data, 0);
 	stream->data.memcpy(destination, &span_empty, sizeof(span_empty), PMEM2_F_MEM_NODRAIN);
-	stream->data.memset(destination + sizeof(span_empty), 0, empty_size,
-			    PMEM2_F_MEM_NONTEMPORAL | PMEM2_F_MEM_NODRAIN);
 
 	stream->header->stream_size = stream->stream_size;
 	stream->header->block_size = stream->block_size;
@@ -204,7 +202,6 @@ int pmemstream_region_free(struct pmemstream *stream, struct pmemstream_region r
 	size_t empty_size = stream->usable_size - sizeof(struct span_empty);
 	struct span_empty span_empty = {.span_base = span_base_create(empty_size, SPAN_EMPTY)};
 	stream->data.memcpy(destination, &span_empty, sizeof(span_empty), PMEM2_F_MEM_NODRAIN);
-	stream->data.memset(destination + sizeof(span_empty), 0, empty_size, PMEM2_F_MEM_NONTEMPORAL);
 
 	region_runtimes_map_remove(stream->region_runtimes_map, region);
 
@@ -228,7 +225,8 @@ size_t pmemstream_entry_length(struct pmemstream *stream, struct pmemstream_entr
 int pmemstream_region_runtime_initialize(struct pmemstream *stream, struct pmemstream_region region,
 					 struct pmemstream_region_runtime **region_runtime)
 {
-	int ret = region_runtimes_map_get_or_create(stream->region_runtimes_map, region, region_runtime);
+	struct span_region *span_region = (struct span_region *)span_offset_to_span_ptr(&stream->data, region.offset);
+	int ret = region_runtimes_map_get_or_create(stream->region_runtimes_map, region, span_region, region_runtime);
 	if (ret) {
 		return ret;
 	}
@@ -286,8 +284,7 @@ int pmemstream_publish(struct pmemstream *stream, struct pmemstream_region regio
 		}
 	}
 
-	struct span_entry span_entry = {.span_base = span_base_create(size, SPAN_ENTRY),
-					.popcount = util_popcount_memory(data, size)};
+	struct span_entry span_entry = {.span_base = span_base_create(size, SPAN_ENTRY)};
 
 	uint8_t *destination = (uint8_t *)span_offset_to_span_ptr(&stream->data, reserved_entry->offset);
 	stream->data.memcpy(destination, &span_entry, sizeof(span_entry), PMEM2_F_MEM_NOFLUSH);
@@ -318,8 +315,7 @@ int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region
 		return ret;
 	}
 
-	struct span_entry span_entry = {.span_base = span_base_create(size, SPAN_ENTRY),
-					.popcount = util_popcount_memory(data, size)};
+	struct span_entry span_entry = {.span_base = span_base_create(size, SPAN_ENTRY)};
 
 	uint8_t *destination = (uint8_t *)span_offset_to_span_ptr(&stream->data, reserved_entry.offset);
 	stream->data.memcpy(destination, &span_entry, sizeof(span_entry), PMEM2_F_MEM_NOFLUSH);
@@ -333,4 +329,17 @@ int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region
 	}
 
 	return 0;
+}
+
+void pmemstream_sync(struct pmemstream *stream, struct pmemstream_region region,
+		     struct pmemstream_region_runtime *region_runtime)
+{
+	if (!region_runtime) {
+		int ret = pmemstream_region_runtime_initialize(stream, region, &region_runtime);
+		if (ret) {
+			return ret;
+		}
+	}
+
+	region_runtime_sync_persisted_offset(&stream->data, region_runtime);
 }

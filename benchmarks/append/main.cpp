@@ -238,6 +238,7 @@ class pmemstream_workload : public benchmark::workload_base {
 				throw std::runtime_error("Error while appending " + std::to_string(i) + " entry!");
 			}
 		}
+		pmemstream_sync(stream.get(), region, region_runtime_ptr);
 	}
 
 	void clean() override
