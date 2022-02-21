@@ -31,12 +31,6 @@ static void perform_free_list_head_to_allocated_list_tail_move(const struct pmem
 {
 	uint64_t region_free = header->free_list.head;
 
-	struct span_base *span = (struct span_base *)span_offset_to_span_ptr(runtime, region_free);
-	assert(span_get_type(span) == SPAN_REGION);
-
-	/* XXX: remove after getting rid of popcount. */
-	runtime->memset(((struct span_region *)span)->data, 0, span_get_size(span), PMEM2_F_MEM_NONTEMPORAL);
-
 	SLIST_INSERT_TAIL(struct span_region, runtime, &header->allocated_list, region_free,
 			  allocator_entry_metadata.next_allocated);
 	SLIST_REMOVE_HEAD(struct span_region, runtime, &header->free_list, allocator_entry_metadata.next_free);

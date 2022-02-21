@@ -127,7 +127,7 @@ int pmemstream_from_map(struct pmemstream **stream, size_t block_size, struct pm
 
 	allocator_runtime_initialize(&s->data, &s->header->region_allocator_header);
 
-	s->region_runtimes_map = region_runtimes_map_new();
+	s->region_runtimes_map = region_runtimes_map_new(&s->data);
 	if (!s->region_runtimes_map) {
 		goto err;
 	}
@@ -324,8 +324,7 @@ int pmemstream_publish(struct pmemstream *stream, struct pmemstream_region regio
 		}
 	}
 
-	struct span_entry span_entry = {.span_base = span_base_create(size, SPAN_ENTRY),
-					.popcount = util_popcount_memory(data, size)};
+	struct span_entry span_entry = {.span_base = span_base_create(size, SPAN_ENTRY)};
 
 	uint8_t *destination = (uint8_t *)span_offset_to_span_ptr(&stream->data, reserved_entry.offset);
 	stream->data.memcpy(destination, &span_entry, sizeof(span_entry), PMEM2_F_MEM_NOFLUSH);
@@ -372,7 +371,7 @@ static void publish_to_append_map(struct future_context *publish_ctx, struct fut
 	struct pmemstream_async_publish_output *publish_output = future_context_get_output(publish_ctx);
 	struct pmemstream_async_append_output *append_output = future_context_get_output(append_ctx);
 
-	append_output->error_code = publish_output->error_code;
+	append_output->status = publish_output->status;
 }
 
 static enum future_state pmemstream_async_publish_impl(struct future_context *ctx, struct future_notifier *notifier)
@@ -387,7 +386,7 @@ static enum future_state pmemstream_async_publish_impl(struct future_context *ct
 
 	int ret = pmemstream_publish(data->stream, data->region, data->region_runtime, data->data, data->size,
 				     data->reserved_entry);
-	out->error_code = ret;
+	out->status = ret;
 
 	return FUTURE_STATE_COMPLETE;
 }
@@ -422,7 +421,7 @@ struct pmemstream_async_append_fut pmemstream_async_append(struct pmemstream *st
 		int ret = pmemstream_region_runtime_initialize(stream, region, &region_runtime);
 		if (ret) {
 			/* return future already completed, with the error code set */
-			future.output.error_code = ret;
+			future.output.status = ret;
 			FUTURE_INIT_COMPLETE(&future);
 			return future;
 		}
@@ -433,7 +432,7 @@ struct pmemstream_async_append_fut pmemstream_async_append(struct pmemstream *st
 	int ret = pmemstream_reserve(stream, region, region_runtime, size, &reserved_entry, &reserved_dest);
 	if (ret) {
 		/* return future already completed, with the error code set */
-		future.output.error_code = ret;
+		future.output.status = ret;
 		FUTURE_INIT_COMPLETE(&future);
 		return future;
 	}
@@ -445,8 +444,34 @@ struct pmemstream_async_append_fut pmemstream_async_append(struct pmemstream *st
 	FUTURE_CHAIN_ENTRY_INIT(&future.data.publish,
 				pmemstream_async_publish(stream, region, region_runtime, data, size, reserved_entry),
 				publish_to_append_map, NULL);
+	// FUTURE_CHAIN_ENTRY_INIT(&future.data.persist, ...); // this future, on poll would just query the
+	// persisted offset and if persisted one is >= than this entry offset it would return FUTURE_COMPLETED.
+
+	// Additionally, 'status' variable in *_output structures should specify which stage the future is at.
+	// E.g. it should be set to STATE_COMMITED after publish completes and STATE_PERSISTED after offset is
+	// persisted.
+
+	// XXX: do we want to have 2 types of futures (just for checking state and for doing actual work)?
+	// Rationale: runtime can implement efficient checks for multiple in-progress futures
+	// Instead of using chained futures, we could create pmemstream_async_publish_output which would contain
+	// worker_persist_future and checker_persist_future which can be polled by the user.
 
 	FUTURE_CHAIN_INIT(&future);
 
 	return future;
+}
+
+int pmemstream_sync(struct pmemstream *stream, struct pmemstream_region region,
+		     struct pmemstream_region_runtime *region_runtime)
+{
+	if (!region_runtime) {
+		int ret = pmemstream_region_runtime_initialize(stream, region, &region_runtime);
+		if (ret) {
+			return ret;
+		}
+	}
+
+	region_runtime_sync_persisted_offset(stream->region_runtimes_map, region_runtime);
+
+	return 0;
 }

@@ -121,9 +121,9 @@ int main(int argc, char *argv[])
 				/* Since each append is done in an individual region, we may already, safely
 				 * read out and print appended value. */
 				struct pmemstream_async_append_output *out = FUTURE_OUTPUT(&append_futures[i]);
-				if (out->error_code != 0) {
+				if (out->status != 0) {
 					fprintf(stderr, "pmemstream_append_async (no. %d) failed\n", i);
-					return out->error_code;
+					return out->status;
 				}
 				read_data = (const struct data_entry *)pmemstream_entry_data(stream, out->new_entry);
 				printf("async append (no. %d) read data: %lu\n", i, read_data->data);

@@ -45,7 +45,7 @@ struct pmemstream_async_publish_data {
 
 /* async publish output */
 struct pmemstream_async_publish_output {
-	int error_code;
+	int status;
 };
 
 FUTURE(pmemstream_async_publish_fut, struct pmemstream_async_publish_data, struct pmemstream_async_publish_output);
@@ -56,9 +56,9 @@ struct pmemstream_async_append_data {
 	FUTURE_CHAIN_ENTRY(struct pmemstream_async_publish_fut, publish);
 };
 
-/* async append returns new entry's offset on success (error_code == 0) */
+/* async append returns new entry's offset on success (status == 0) */
 struct pmemstream_async_append_output {
-	int error_code;
+	int status;
 	struct pmemstream_entry new_entry;
 };
 
@@ -138,6 +138,10 @@ struct pmemstream_async_append_fut pmemstream_async_append(struct pmemstream *st
 							   struct pmemstream_region region,
 							   struct pmemstream_region_runtime *region_runtime,
 							   const void *data, size_t size);
+
+/* Stores offset of last commited entry durably on persistent media. */
+int pmemstream_sync(struct pmemstream *stream, struct pmemstream_region region,
+		     struct pmemstream_region_runtime *region_runtime);
 
 // returns pointer to the data of the entry
 const void *pmemstream_entry_data(struct pmemstream *stream, struct pmemstream_entry entry);

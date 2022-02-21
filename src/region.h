@@ -18,26 +18,25 @@
 extern "C" {
 #endif
 
+struct pmemstream_data_runtime;
+
 /**
  * Functions for manipulating regions and region_runtime.
  */
 
-/* After opening pmemstream, each region_runtime is in one of those 3 states.
+/* After opening pmemstream, each region_runtime is in one of those 2 states.
  * The only possible state transitions are:
- * UNINITIALIZED -> READ_READY
- * UNINITIALIZED -> WRITE_READY
  * READ_READY -> WRITE_READY
  */
 enum region_runtime_state {
-	REGION_RUNTIME_STATE_UNINITIALIZED, /* region metadata is not initialized */
-	REGION_RUNTIME_STATE_READ_READY,    /* reading from the region is safe */
-	REGION_RUNTIME_STATE_WRITE_READY    /* reading and writing to the region is safe */
+	REGION_RUNTIME_STATE_READ_READY, /* reading from the region is safe */
+	REGION_RUNTIME_STATE_WRITE_READY /* reading and writing to the region is safe */
 };
 
 struct pmemstream_region_runtime;
 struct region_runtimes_map;
 
-struct region_runtimes_map *region_runtimes_map_new(void);
+struct region_runtimes_map *region_runtimes_map_new(struct pmemstream_runtime *data);
 void region_runtimes_map_destroy(struct region_runtimes_map *map);
 
 /*
@@ -51,15 +50,19 @@ void region_runtimes_map_remove(struct region_runtimes_map *map, struct pmemstre
 
 enum region_runtime_state region_runtime_get_state_acquire(const struct pmemstream_region_runtime *region_runtime);
 
-/* Precondition: region_runtime_get_state_acquire() != REGION_RUNTIME_STATE_UNINITIALIZED */
+/* Precondition: region_runtime_get_state_acquire() == REGION_RUNTIME_STATE_WRITE_READY */
 uint64_t region_runtime_get_append_offset_acquire(const struct pmemstream_region_runtime *region_runtime);
-/* Precondition: region_runtime_get_state_acquire() != REGION_RUNTIME_STATE_UNINITIALIZED */
+/* Precondition: region_runtime_get_state_acquire() == REGION_RUNTIME_STATE_WRITE_READY */
 uint64_t region_runtime_get_committed_offset_acquire(const struct pmemstream_region_runtime *region_runtime);
 
 /* Precondition: region_runtime_get_state_acquire() == REGION_RUNTIME_STATE_WRITE_READY */
 void region_runtime_increase_append_offset(struct pmemstream_region_runtime *region_runtime, uint64_t diff);
 /* Precondition: region_runtime_get_state_acquire() == REGION_RUNTIME_STATE_WRITE_READY */
 void region_runtime_increase_committed_offset(struct pmemstream_region_runtime *region_runtime, uint64_t diff);
+/* Syncs persisted_offset with commited_offset.
+ * Precondition: region_runtime_get_state_acquire() == REGION_RUNTIME_STATE_WRITE_READY */
+void region_runtime_sync_persisted_offset(struct region_runtimes_map *map,
+					  struct pmemstream_region_runtime *region_runtime);
 
 /*
  * Performs region recovery.
@@ -67,13 +70,6 @@ void region_runtime_increase_committed_offset(struct pmemstream_region_runtime *
  */
 int region_runtime_initialize_for_write_locked(struct pmemstream *stream, struct pmemstream_region region,
 					       struct pmemstream_region_runtime *region_runtime);
-
-/*
- * Performs region recovery.
- * After this call, it's safe to read from the region.
- */
-void region_runtime_initialize_for_read_locked(struct pmemstream_region_runtime *region_runtime,
-					       struct pmemstream_entry tail);
 
 #ifdef __cplusplus
 } /* end extern "C" */

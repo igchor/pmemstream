@@ -24,6 +24,7 @@ LIBPMEMSTREAM_1.0 {
 		pmemstream_async_publish;
 		pmemstream_region_allocate;
 		pmemstream_region_free;
+		pmemstream_sync;
 	local:
 		*;
 };

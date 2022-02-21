@@ -227,7 +227,7 @@ struct pmemstream_helpers_type {
 		auto futures = std::vector<struct pmemstream_async_append_fut>();
 		for (size_t i = 0; i < data.size(); ++i) {
 			auto fut = stream.async_append(thread_mover, region, data[i], region_runtime[region.offset]);
-			UT_ASSERTeq(fut.output.error_code, 0);
+			UT_ASSERTeq(fut.output.status, 0);
 			futures.push_back(fut);
 		}
 
