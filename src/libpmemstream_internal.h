@@ -19,21 +19,26 @@ extern "C" {
 
 #define PMEMSTREAM_SIGNATURE ("PMEMSTREAM")
 #define PMEMSTREAM_SIGNATURE_SIZE (64)
+#define PMEMSTREAM_OFFSET_INVALID UINT64_MAX
 
 struct pmemstream_header {
 	char signature[PMEMSTREAM_SIGNATURE_SIZE];
 	uint64_t stream_size;
 	uint64_t block_size;
+	uint64_t timestamp;
 };
 
-struct pmemstream_data_runtime {
-	span_bytes *spans;
-
+struct memops {
 	pmem2_memcpy_fn memcpy;
 	pmem2_memset_fn memset;
 	pmem2_flush_fn flush;
 	pmem2_drain_fn drain;
 	pmem2_persist_fn persist;
+};
+
+struct pmemstream_data_runtime {
+	span_bytes *spans;
+	struct memops memops;
 };
 
 struct pmemstream {
@@ -48,6 +53,10 @@ struct pmemstream {
 	size_t block_size;
 
 	struct region_runtimes_map *region_runtimes_map;
+
+	struct shadow_state shadow_persistent_timestamp;
+
+	uint64_t commited_timestamp;
 };
 
 static inline const uint8_t *pmemstream_offset_to_ptr(const struct pmemstream_data_runtime *data, uint64_t offset)

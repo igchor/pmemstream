@@ -8,10 +8,6 @@
 #include <assert.h>
 #include <errno.h>
 
-#ifndef NDEBUG
-#define PMEMSTREAM_OFFSET_UNINITIALIZED 0ULL
-#endif
-
 /*
  * It contains all runtime data specific to a region.
  * It is always managed by the pmemstream (user can only obtain a non-owning pointer) and can be created
@@ -103,7 +99,7 @@ static int region_runtimes_map_create_or_fail(struct region_runtimes_map *map, s
 
 	runtime->state = REGION_RUNTIME_STATE_WRITE_READY;
 	runtime->persistent_span_region = persistent_span_region;
-	runtime->append_offset = runtime->committed_offset = persistent_span_region->persisted_offset;
+	runtime->append_offset = runtime->committed_offset = PMEMSTREAM_OFFSET_INVALID;
 
 	int ret = pthread_mutex_init(&runtime->region_lock, NULL);
 	if (ret) {
@@ -204,15 +200,15 @@ void region_runtime_sync_persisted_offset(struct pmemstream_data_runtime *data_r
 }
 
 static void region_runtime_initialize_for_write_no_lock(struct pmemstream_region_runtime *region_runtime,
-							struct pmemstream_entry tail)
+							uint64_t tail_offset)
 {
 	/* invariant, region_initialization should always happen under a lock. */
 	assert(pthread_mutex_trylock(&region_runtime->region_lock) != 0);
 	assert(region_runtime);
-	assert(tail.offset != PMEMSTREAM_OFFSET_UNINITIALIZED);
+	assert(tail_offset != PMEMSTREAM_OFFSET_INVALID);
 
-	/* XXX */
-	assert(false);
+	region_runtime->append_offset = tail_offset;
+	region_runtime->committed_offset = tail_offset;
 
 	__atomic_store_n(&region_runtime->state, REGION_RUNTIME_STATE_WRITE_READY, __ATOMIC_RELEASE);
 }
@@ -241,7 +237,7 @@ static int region_iterate_and_initialize_for_write(struct pmemstream *stream, st
 }
 
 int region_runtime_initialize_for_write_locked(struct pmemstream *stream, struct pmemstream_region region,
-					       struct pmemstream_region_runtime *region_runtime)
+					       struct pmemstream_region_runtime *region_runtime, uint64_t offset)
 {
 	int ret = 0;
 	assert(region_runtime);
@@ -255,7 +251,11 @@ int region_runtime_initialize_for_write_locked(struct pmemstream *stream, struct
 
 	enum region_runtime_state state_locked = region_runtime_get_state_acquire(region_runtime);
 	if (state_locked == REGION_RUNTIME_STATE_READ_READY) {
-		ret = region_iterate_and_initialize_for_write(stream, region, region_runtime);
+		if (offset != PMEMSTREAM_OFFSET_INVALID) {
+			ret = region_runtime_initialize_for_write_no_lock(stream, region, region_runtime, offset);
+		} else {
+			ret = region_iterate_and_initialize_for_write(stream, region, region_runtime);
+		}
 	} else {
 		/* Write_ready. Nothing to do. */
 	}
@@ -263,6 +263,6 @@ int region_runtime_initialize_for_write_locked(struct pmemstream *stream, struct
 	pthread_mutex_unlock(&region_runtime->region_lock);
 
 	assert(region_runtime_get_state_acquire(region_runtime) == REGION_RUNTIME_STATE_WRITE_READY);
-	assert(region_runtime_get_append_offset_acquire(region_runtime) != PMEMSTREAM_OFFSET_UNINITIALIZED);
+	assert(region_runtime_get_append_offset_acquire(region_runtime) != PMEMSTREAM_OFFSET_INVALID);
 	return ret;
 }

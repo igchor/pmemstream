@@ -60,17 +60,16 @@ uint64_t region_runtime_get_committed_offset_acquire(const struct pmemstream_reg
 void region_runtime_increase_append_offset(struct pmemstream_region_runtime *region_runtime, uint64_t diff);
 /* Precondition: region_runtime_get_state_acquire() == REGION_RUNTIME_STATE_WRITE_READY */
 void region_runtime_increase_committed_offset(struct pmemstream_region_runtime *region_runtime, uint64_t diff);
-/* Syncs persisted_offset with commited_offset.
- * Precondition: region_runtime_get_state_acquire() == REGION_RUNTIME_STATE_WRITE_READY */
-void region_runtime_sync_persisted_offset(struct pmemstream_data_runtime *data_runtime,
-					  struct pmemstream_region_runtime *region_runtime);
 
 /*
- * Performs region recovery.
+ * Performs region recovery. If offset is set to PMEMSTREAM_OFFSET_INVALID, this function iterates over entire
+ * region to find last entry and set append/committed offset appropriately. Otherwise, append/committed offsets
+ * are set to 'offset' value.
+ *
  * After this call, it's safe to write to the region.
  */
 int region_runtime_initialize_for_write_locked(struct pmemstream *stream, struct pmemstream_region region,
-					       struct pmemstream_region_runtime *region_runtime);
+					       struct pmemstream_region_runtime *region_runtime, uint64_t offset);
 
 #ifdef __cplusplus
 } /* end extern "C" */
