@@ -41,7 +41,6 @@ struct span_base {
 struct span_region {
 	alignas(CACHELINE_SIZE) struct span_base span_base;
 	struct allocator_entry_metadata allocator_entry_metadata;
-	uint64_t persisted_offset;
 
 	alignas(CACHELINE_SIZE) uint64_t data[];
 };
@@ -51,6 +50,7 @@ static_assert(sizeof(struct span_region) == CACHELINE_SIZE,
 
 struct span_entry {
 	struct span_base span_base;
+	uint64_t timestamp;
 	uint64_t data[];
 };
 

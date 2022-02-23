@@ -37,6 +37,7 @@ static void pmemstream_init(struct pmemstream *stream)
 
 	stream->header->stream_size = stream->stream_size;
 	stream->header->block_size = stream->block_size;
+	stream->header->timestamp = 0;
 	stream->data.persist(stream->header, sizeof(struct pmemstream_header));
 
 	stream->data.memcpy(stream->header->signature, PMEMSTREAM_SIGNATURE, strlen(PMEMSTREAM_SIGNATURE),
@@ -257,7 +258,7 @@ int pmemstream_region_runtime_initialize(struct pmemstream *stream, struct pmems
 
 	assert(*region_runtime);
 
-	return region_runtime_initialize_for_write_locked(stream, region, *region_runtime);
+	return region_runtime_initialize_for_write_locked(stream, region, *region_runtime, PMEMSTREAM_OFFSET_INVALID);
 }
 
 static size_t pmemstream_entry_total_size_aligned(size_t size)
@@ -327,11 +328,20 @@ int pmemstream_publish(struct pmemstream *stream, struct pmemstream_region regio
 	struct span_entry span_entry = {.span_base = span_base_create(size, SPAN_ENTRY)};
 
 	uint8_t *destination = (uint8_t *)span_offset_to_span_ptr(&stream->data, reserved_entry.offset);
+
+	// get timestamp for the entry(ies)
+	uint64_t timestamp = acquire_timestamp(stream);
+
 	stream->data.memcpy(destination, &span_entry, sizeof(span_entry), PMEM2_F_MEM_NOFLUSH);
+	stream->data.memcpy(destination + pmemstream_entry_total_size_aligned(size), &timestamp, sizeof(timestmap), PMEM2_F_MEM_NOFLUSH);
+
+	// memset data right after entry to make recovery easier
+	stream->data.memset(destination + pmemstream_entry_total_size_aligned(size) + sizeof(timestamp), 0, 8, PMEM2_F_MEM_NOFLUSH);
 	/* 'data' is already copied - we only need to persist. */
 	stream->data.persist(destination, pmemstream_entry_total_size_aligned(size));
 
-	region_runtime_increase_committed_offset(region_runtime, pmemstream_entry_total_size_aligned(size));
+	// mark timestamp as ready to be commited/persisted - at this point data is fully written to pmem.
+	produce_timestamp(stream, timestamp);
 
 	return 0;
 }
@@ -461,17 +471,50 @@ struct pmemstream_async_append_fut pmemstream_async_append(struct pmemstream *st
 	return future;
 }
 
-int pmemstream_sync(struct pmemstream *stream, struct pmemstream_region region,
-		     struct pmemstream_region_runtime *region_runtime)
+// XXX: possible variants:
+// - advance as far as possible and return persisted timestamp (pmemstream_sync_all)
+// - advance as far as possible and wait if nothing to do since last call (similar to waiting on iouring completion)
+// - advance to specified offset (pmemstream_sync_to)
+uint64_t pmemstream_sync_all(struct pmemstream *stream)
 {
-	if (!region_runtime) {
-		int ret = pmemstream_region_runtime_initialize(stream, region, &region_runtime);
-		if (ret) {
-			return ret;
-		}
+	uint64_t timestamp = consume_timestamp(stream);
+	if (timestamp > stream->header->timestamp) {
+		... // updated stream->header->timestamp and persist it
 	}
 
-	region_runtime_sync_persisted_offset(stream->region_runtimes_map, region_runtime);
+	return timestamp;
+}
 
-	return 0;
+uint64_t pmemstream_sync_to(struct pmemstream *stream, uint64_t timestamp)
+{
+	do {
+		uint64_t persisted_timestamp = pmemstream_sync_all(stream);
+		// XXX: sleep?
+	} while (persisted_timestamp < timestamp);
+}
+
+uint64_t pmemstream_persisted_timestamp(struct pmemstream *stream)
+{
+	return stream->header->timestamp;
+}
+
+
+/////////////
+
+uint64_t acquire_timestamp(stream)
+{
+	uint64_t producer_id = thread_id_get(stream->thread_id);
+	// XXX: ideally we want to allow single thread to have multiple ids
+	// this is necessary for async publish
+
+	return mpmc_queue_acquire(..., producer_id);
+}
+
+uint64_t produce_timestamp(stream, timestamp)
+{
+	uint64_t producer_id = thread_id_get(stream->thread_id);
+	// XXX: ideally we want to allow single thread to have multiple ids
+	// this is necessary for async publish
+
+	return mpmc_queue_produce(stream, producer_id);
 }

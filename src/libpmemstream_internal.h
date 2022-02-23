@@ -21,12 +21,27 @@ extern "C" {
 
 #define PMEMSTREAM_SIGNATURE ("PMEMSTREAM")
 #define PMEMSTREAM_SIGNATURE_SIZE (64)
+#define PMEMSTREAM_OFFSET_INVALID UINT64_MAX
 
 struct pmemstream_header {
 	char signature[PMEMSTREAM_SIGNATURE_SIZE];
 	uint64_t stream_size;
 	uint64_t block_size;
 	struct allocator_header region_allocator_header;
+	uint64_t timestamp;
+};
+
+struct memops {
+	pmem2_memcpy_fn memcpy;
+	pmem2_memset_fn memset;
+	pmem2_flush_fn flush;
+	pmem2_drain_fn drain;
+	pmem2_persist_fn persist;
+};
+
+struct pmemstream_data_runtime {
+	span_bytes *spans;
+	struct memops memops;
 };
 
 struct pmemstream {
@@ -41,6 +56,8 @@ struct pmemstream {
 	size_t block_size;
 
 	struct region_runtimes_map *region_runtimes_map;
+
+	uint64_t commited_timestamp;
 };
 
 static inline int pmemstream_validate_stream_and_offset(struct pmemstream *stream, uint64_t offset)

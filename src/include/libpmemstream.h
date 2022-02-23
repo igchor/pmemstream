@@ -139,9 +139,10 @@ struct pmemstream_async_append_fut pmemstream_async_append(struct pmemstream *st
 							   struct pmemstream_region_runtime *region_runtime,
 							   const void *data, size_t size);
 
-/* Stores offset of last commited entry durably on persistent media. */
-int pmemstream_sync(struct pmemstream *stream, struct pmemstream_region region,
-		     struct pmemstream_region_runtime *region_runtime);
+uint64_t pmemstream_sync_all(struct pmemstream *stream);
+uint64_t pmemstream_sync_to(struct pmemstream *stream, uint64_t timestamp);
+
+uint64_t pmemstream_persisted_timestamp(struct pmemstream *stream);
 
 // returns pointer to the data of the entry
 const void *pmemstream_entry_data(struct pmemstream *stream, struct pmemstream_entry entry);

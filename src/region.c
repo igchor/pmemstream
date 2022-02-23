@@ -8,10 +8,6 @@
 #include <assert.h>
 #include <errno.h>
 
-#ifndef NDEBUG
-#define PMEMSTREAM_OFFSET_UNINITIALIZED 0ULL
-#endif
-
 /*
  * It contains all runtime data specific to a region.
  * It is always managed by the pmemstream (user can only obtain a non-owning pointer) and can be created
@@ -27,16 +23,9 @@ struct pmemstream_region_runtime {
 	uint64_t region_offset;
 
 	/*
-	 * Offset at which new entries will be appended. Also serves as indicator of region runtime initialization
-	 * state.
+	 * Offset at which new entries will be appended.
 	 */
 	uint64_t append_offset;
-
-	/*
-	 * All entries which start at offset < committed_offset can be treated as committed and safely read
-	 * from multiple threads.
-	 */
-	uint64_t committed_offset;
 
 	/* Protects region initialization step. */
 	pthread_mutex_t region_lock;
@@ -100,11 +89,9 @@ static int region_runtimes_map_create_or_fail(struct region_runtimes_map *map, s
 		return -1;
 	}
 
-	struct span_region *span_region = (struct span_region *) span_offset_to_span_ptr(map->data, region.offset);
-
-	runtime->state = REGION_RUNTIME_STATE_WRITE_READY;
+	runtime->state = REGION_RUNTIME_STATE_READ_READY;
 	runtime->region_offset = region.offset;
-	runtime->append_offset = runtime->committed_offset = span_region->persisted_offset;
+	runtime->append_offset = PMEMSTREAM_INVALID_OFFSET;
 
 	int ret = pthread_mutex_init(&runtime->region_lock, NULL);
 	if (ret) {
@@ -163,12 +150,6 @@ uint64_t region_runtime_get_append_offset_acquire(const struct pmemstream_region
 	return __atomic_load_n(&region_runtime->append_offset, __ATOMIC_ACQUIRE);
 }
 
-uint64_t region_runtime_get_committed_offset_acquire(const struct pmemstream_region_runtime *region_runtime)
-{
-	assert(region_runtime_get_state_acquire(region_runtime) == REGION_RUNTIME_STATE_WRITE_READY);
-	return __atomic_load_n(&region_runtime->committed_offset, __ATOMIC_ACQUIRE);
-}
-
 void region_runtimes_map_remove(struct region_runtimes_map *map, struct pmemstream_region region)
 {
 	struct pmemstream_region_runtime *runtime = critnib_remove(map->container, region.offset);
@@ -186,34 +167,29 @@ void region_runtime_increase_append_offset(struct pmemstream_region_runtime *reg
 	__atomic_fetch_add(&region_runtime->append_offset, diff, __ATOMIC_RELAXED);
 }
 
-void region_runtime_increase_committed_offset(struct pmemstream_region_runtime *region_runtime, uint64_t diff)
-{
-	assert(region_runtime_get_state_acquire(region_runtime) == REGION_RUNTIME_STATE_WRITE_READY);
-	__atomic_fetch_add(&region_runtime->committed_offset, diff, __ATOMIC_RELEASE);
-}
-
 void region_runtime_sync_persisted_offset(struct region_runtimes_map *map, struct pmemstream_region_runtime *region_runtime)
 {
 	assert(region_runtime_get_state_acquire(region_runtime) == REGION_RUNTIME_STATE_WRITE_READY);
 
-	uint64_t commited_offset = region_runtime_get_committed_offset_acquire(region_runtime);
-	struct span_region *span_region = (struct span_region *) span_offset_to_span_ptr(map->data, region_runtime->region_offset);
-	__atomic_store_n(&span_region->persisted_offset, commited_offset, __ATOMIC_RELAXED);
-	map->data->persist(&span_region->persisted_offset, sizeof(commited_offset));
+	// uint64_t commited_offset = region_runtime_get_committed_offset_acquire(region_runtime);
+	// struct span_region *span_region = (struct span_region *) span_offset_to_span_ptr(map->data, region_runtime->region_offset);
+	// __atomic_store_n(&span_region->persisted_offset, commited_offset, __ATOMIC_RELAXED);
+	// map->data->persist(&span_region->persisted_offset, sizeof(commited_offset));
 }
 
-static void region_runtime_initialize_for_write_no_lock(struct pmemstream_region_runtime *region_runtime,
-							struct pmemstream_entry tail)
+static int region_runtime_initialize_for_write_no_lock(struct pmemstream *stream, struct pmemstream_region region, struct pmemstream_region_runtime *region_runtime,
+							uint64_t tail_offset)
 {
 	/* invariant, region_initialization should always happen under a lock. */
 	assert(pthread_mutex_trylock(&region_runtime->region_lock) != 0);
 	assert(region_runtime);
-	assert(tail.offset != PMEMSTREAM_OFFSET_UNINITIALIZED);
+	assert(tail_offset != PMEMSTREAM_OFFSET_INVALID);
 
-	/* XXX: This function will not be called since region runtime is initialized to WRITE_READY always */
-	assert(false);
+	region_runtime->append_offset = tail_offset;
 
 	__atomic_store_n(&region_runtime->state, REGION_RUNTIME_STATE_WRITE_READY, __ATOMIC_RELEASE);
+
+	return 0;
 }
 
 /* Iterates over entire region. Might initialize region. Should be called under a lock. */
@@ -240,7 +216,7 @@ static int region_iterate_and_initialize_for_write(struct pmemstream *stream, st
 }
 
 int region_runtime_initialize_for_write_locked(struct pmemstream *stream, struct pmemstream_region region,
-					       struct pmemstream_region_runtime *region_runtime)
+					       struct pmemstream_region_runtime *region_runtime, uint64_t offset)
 {
 	int ret = 0;
 	assert(region_runtime);
@@ -254,7 +230,11 @@ int region_runtime_initialize_for_write_locked(struct pmemstream *stream, struct
 
 	enum region_runtime_state state_locked = region_runtime_get_state_acquire(region_runtime);
 	if (state_locked == REGION_RUNTIME_STATE_READ_READY) {
-		ret = region_iterate_and_initialize_for_write(stream, region, region_runtime);
+		if (offset != PMEMSTREAM_OFFSET_INVALID) {
+			ret = region_runtime_initialize_for_write_no_lock(stream, region, region_runtime, offset);
+		} else {
+			ret = region_iterate_and_initialize_for_write(stream, region, region_runtime);
+		}
 	} else {
 		/* Write_ready. Nothing to do. */
 	}
@@ -262,6 +242,6 @@ int region_runtime_initialize_for_write_locked(struct pmemstream *stream, struct
 	pthread_mutex_unlock(&region_runtime->region_lock);
 
 	assert(region_runtime_get_state_acquire(region_runtime) == REGION_RUNTIME_STATE_WRITE_READY);
-	assert(region_runtime_get_append_offset_acquire(region_runtime) != PMEMSTREAM_OFFSET_UNINITIALIZED);
+	assert(region_runtime_get_append_offset_acquire(region_runtime) != PMEMSTREAM_OFFSET_INVALID);
 	return ret;
 }

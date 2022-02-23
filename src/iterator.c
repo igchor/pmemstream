@@ -84,10 +84,6 @@ int entry_iterator_initialize(struct pmemstream_entry_iterator *iterator, struct
 	return 0;
 }
 
-static void nop_initialize(struct pmemstream_region_runtime *rr, struct pmemstream_entry e)
-{
-}
-
 int pmemstream_entry_iterator_new(struct pmemstream_entry_iterator **iterator, struct pmemstream *stream,
 				  struct pmemstream_region region)
 {
@@ -100,7 +96,7 @@ int pmemstream_entry_iterator_new(struct pmemstream_entry_iterator **iterator, s
 		return -1;
 	}
 
-	int ret = entry_iterator_initialize(iter, stream, region, &nop_initialize);
+	int ret = entry_iterator_initialize(iter, stream, region, &region_runtime_initialize_for_write_locked);
 	if (ret) {
 		goto err;
 	}
@@ -114,6 +110,24 @@ err:
 	return ret;
 }
 
+static int validate_entry(const struct pmemstream *stream, struct pmemstream_entry entry)
+{
+	/* XXX: reading this span metadata is potentially dangerous. It might happen so that
+	 * before calling this function region_runtime is in READ_READY state but some other thread
+	 * changes it to WRITE_READY while span metadata is read. We might fix this using Optimistic Concurrency
+	 * Control (using region_runtime state). */
+	const struct span_base *span_base = span_offset_to_span_ptr(&stream->data, entry.offset);
+	if (span_get_type(span_base) != SPAN_ENTRY) {
+		return -1;
+	}
+
+	const struct span_entry *span_entry = (const struct span_entry *)span_base;
+	if (span_entry->timestamp <= stream->commited_timestamp) {
+		return 0;
+	}
+	return -1;
+}
+
 #ifndef NDEBUG
 static bool pmemstream_entry_iterator_offset_is_inside_region(struct pmemstream_entry_iterator *iterator)
 {
@@ -123,29 +137,15 @@ static bool pmemstream_entry_iterator_offset_is_inside_region(struct pmemstream_
 }
 #endif
 
-/* Precondition: region_runtime is initialized. */
-static bool pmemstream_entry_iterator_offset_is_below_committed(struct pmemstream_entry_iterator *iterator)
+static bool pmemstream_entry_iterator_offset_at_valid_entry(struct pmemstream_entry_iterator *iterator)
 {
-	assert(region_runtime_get_state_acquire(iterator->region_runtime) == REGION_RUNTIME_STATE_WRITE_READY);
-
-	/* Make sure that we didn't go beyond committed entries. */
-	uint64_t committed_offset = region_runtime_get_committed_offset_acquire(iterator->region_runtime);
-	if (iterator->offset >= committed_offset) {
-		return false;
-	}
-
 	assert(pmemstream_entry_iterator_offset_is_inside_region(iterator));
 
-	return true;
-}
+	const struct span_base *span_base = span_offset_to_span_ptr(&iterator->stream->data, iterator->region.offset);
+	uint64_t region_end_offset = iterator->region.offset + span_get_total_size(span_base);
+	struct pmemstream_entry entry = {.offset = iterator->offset};
 
-static int pmemstream_entry_iterator_offset_at_valid_entry(struct pmemstream_entry_iterator *iterator)
-{
-	assert(region_runtime_get_state_acquire(iterator->region_runtime) == REGION_RUNTIME_STATE_READ_READY);
-
-	// XXX
-
-	return 0;
+	return iterator->offset < region_end_offset && validate_entry(iterator->stream, entry) == 0;
 }
 
 static void pmemstream_entry_iterator_advance(struct pmemstream_entry_iterator *iterator)
@@ -160,37 +160,6 @@ static void pmemstream_entry_iterator_advance(struct pmemstream_entry_iterator *
 	assert(pmemstream_entry_iterator_offset_is_inside_region(iterator));
 }
 
-static int pmemstream_entry_iterator_next_when_region_initialized(struct pmemstream_entry_iterator *iterator,
-								  struct pmemstream_entry *user_entry)
-{
-	if (pmemstream_entry_iterator_offset_is_below_committed(iterator)) {
-		if (user_entry) {
-			user_entry->offset = iterator->offset;
-		}
-		pmemstream_entry_iterator_advance(iterator);
-		return 0;
-	}
-
-	return -1;
-}
-
-static int pmemstream_entry_iterator_next_when_region_not_initialized(struct pmemstream_entry_iterator *iterator,
-								      struct pmemstream_entry *user_entry)
-{
-	if (pmemstream_entry_iterator_offset_at_valid_entry(iterator)) {
-		if (user_entry) {
-			user_entry->offset = iterator->offset;
-		}
-		pmemstream_entry_iterator_advance(iterator);
-		return 0;
-	}
-
-	/* Lazy (re-)initialization of region, when needed. */
-	struct pmemstream_entry entry = {.offset = iterator->offset};
-	iterator->region_runtime_initialize_fn(iterator->region_runtime, entry);
-	return -1;
-}
-
 /* Advances entry iterator by one. Verifies entry integrity and initializes region runtime if end of data is found. */
 int pmemstream_entry_iterator_next(struct pmemstream_entry_iterator *iterator, struct pmemstream_region *region,
 				   struct pmemstream_entry *user_entry)
@@ -203,11 +172,22 @@ int pmemstream_entry_iterator_next(struct pmemstream_entry_iterator *iterator, s
 		*region = iterator->region;
 	}
 
-	if (region_runtime_get_state_acquire(iterator->region_runtime) == REGION_RUNTIME_STATE_WRITE_READY) {
-		return pmemstream_entry_iterator_next_when_region_initialized(iterator, user_entry);
+	bool initialization_needed = false;
+	if (region_runtime_get_state_acquire(iterator->region_runtime) == REGION_RUNTIME_STATE_READ_READY) {
+		initialization_needed = true;
 	}
 
-	return pmemstream_entry_iterator_next_when_region_not_initialized(iterator, user_entry);
+	if (pmemstream_entry_iterator_offset_at_valid_entry(iterator)) {
+		pmemstream_entry_iterator_advance(iterator);
+		return 0;
+	}
+
+	if (initialization_needed) {
+		/* Lazy (re-)initialization of region, when needed. */
+		iterator->region_runtime_initialize_fn(iterator->stream, iterator->region, iterator->region_runtime, iterator->offset);
+	}
+
+	return -1;
 }
 
 void pmemstream_entry_iterator_delete(struct pmemstream_entry_iterator **iterator)
