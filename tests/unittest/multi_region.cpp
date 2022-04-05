@@ -49,7 +49,7 @@ int main(int argc, char *argv[])
 			stream.helpers.remove_regions(no_regions);
 			RC_ASSERT(0 == stream.helpers.count_regions());
 
-			// RC_ASSERT_THROWS(stream.helpers.remove_regions(1));
+			RC_ASSERT_THROWS(stream.helpers.remove_regions(1));
 		});
 
 		ret += rc::check("Allocate max possible regions - multiple remove", [&](pmemstream_empty &&stream) {
