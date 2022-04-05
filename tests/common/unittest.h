@@ -18,18 +18,17 @@
 
 #ifdef __cplusplus
 #include <stdexcept>
+
+static char buffer[10240]; /* big enough to hold error message. */
+
 static inline void UT_FATAL(const char *format, ...)
 {
 	va_list args_list;
 	va_start(args_list, format);
-	char buffer[10240]; /* big enough to hold error message. */
-	int written = vsnprintf(buffer, sizeof(buffer), format, args_list);
-	if (written == sizeof(buffer))
-		buffer[written - 1] = '\0';
+	vsnprintf(buffer, sizeof(buffer), format, args_list);
+	va_end(args_list); 
 
-	va_end(args_list);
-
-	throw std::runtime_error(buffer);
+	throw std::runtime_error("XXX");
 }
 #else
 static inline void UT_FATAL(const char *format, ...)
