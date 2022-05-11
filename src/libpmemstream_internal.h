@@ -21,6 +21,7 @@ extern "C" {
 
 #define PMEMSTREAM_SIGNATURE ("PMEMSTREAM")
 #define PMEMSTREAM_SIGNATURE_SIZE (64)
+#define PMEMSTREAM_OFFSET_INVALID 0ULL
 
 struct pmemstream_header {
 	char signature[PMEMSTREAM_SIGNATURE_SIZE];
