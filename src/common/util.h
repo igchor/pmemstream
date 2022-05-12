@@ -39,4 +39,15 @@ static inline size_t util_popcount_memory(const uint8_t *data, size_t size)
 	return count;
 }
 
+/* Copies 'size' bytes from 'dst' to 'src'. After the memory is copied, stores value of `*sync`
+ * into `*read_sync`. */
+#define optimistic_read(sync, read_sync, dst, src, size)\
+do {\
+	__atomic_thread_fence(__ATOMIC_ACQUIRE);\
+	memcpy((char*)dst, (char*)src, size);\
+	__atomic_thread_fence(__ATOMIC_ACQUIRE);\
+	*read_sync = __atomic_load_n(sync, __ATOMIC_RELAXED);\
+} while (0)
+
+
 #endif /* LIBPMEMSTREAM_UTIL_H */
