@@ -75,6 +75,10 @@ int region_runtime_initialize_for_write_locked(struct pmemstream *stream, struct
 void region_runtime_initialize_for_read_locked(struct pmemstream_region_runtime *region_runtime,
 					       struct pmemstream_entry tail);
 
+/*
+ * Checks if iterator points to a valid entry. Performs region initialization if necessary. */
+bool region_validate_entry_iterator_and_maybe_recover_region(const struct pmemstream_entry_iterator *iterator);
+
 #ifdef __cplusplus
 } /* end extern "C" */
 #endif

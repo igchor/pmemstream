@@ -294,6 +294,10 @@ int region_runtime_initialize_for_write_locked(struct pmemstream *stream, struct
 	enum region_runtime_state state_locked = region_runtime_get_state_acquire(region_runtime);
 	if (state_locked == REGION_RUNTIME_STATE_UNINITIALIZED) {
 		ret = region_iterate_and_initialize_for_read(stream, region, region_runtime);
+
+		/* Make sure that marking region as READ_READY happens-before clearing the region. */
+		__atomic_thread_fence(__ATOMIC_RELEASE);
+
 		region_runtime_clear_from_tail(stream, region, region_runtime);
 	} else if (state_locked == REGION_RUNTIME_STATE_READ_READY) {
 		region_runtime_clear_from_tail(stream, region, region_runtime);
@@ -308,4 +312,58 @@ int region_runtime_initialize_for_write_locked(struct pmemstream *stream, struct
 	return ret;
 }
 
+static bool validate_entry_consistency(const struct span_entry *span_entry, const void *data)
+{
+	return span_get_type(&span_entry->span_base) == SPAN_ENTRY &&
+		util_popcount_memory(data, span_get_size(&span_entry->span_base)) == span_entry->popcount;
+}
 
+static bool validate_entry(struct pmemstream *stream, struct pmemstream_region_runtime *region_runtime,
+			   struct pmemstream_entry entry)
+{
+	const struct span_entry *src = (const struct span_entry *)span_offset_to_span_ptr(&stream->data, entry.offset);
+
+	enum region_runtime_state state = region_runtime_get_state_acquire(region_runtime);
+	struct span_entry span_entry;
+
+	if (state == REGION_RUNTIME_STATE_UNINITIALIZED) {
+		/* Read span metadata optimistically. */
+		/* XXX: add test for optimistic metada read. */
+		__atomic_thread_fence(__ATOMIC_ACQUIRE);
+		span_entry = *src;
+		__atomic_thread_fence(__ATOMIC_ACQUIRE);
+
+		state = region_runtime_get_state_acquire(region_runtime);
+	}
+
+	/* If state has not changed from REGION_RUNTIME_STATE_UNINITIALIZED, no one could have overwritten the entry
+	 * metadata. */
+	if (state == REGION_RUNTIME_STATE_UNINITIALIZED) {
+		/* Need to use span_entry to avoid data races. */
+		return validate_entry_consistency(&span_entry, src->data);
+	}
+
+	bool valid = entry.offset < region_runtime_get_committed_offset_acquire(region_runtime);
+	assert(!valid ||
+	       validate_entry_consistency(
+		       (const struct span_entry *)span_offset_to_span_ptr(&stream->data, entry.offset), src->data));
+
+	return valid;
+}
+
+bool region_validate_entry_iterator_and_maybe_recover_region(const struct pmemstream_entry_iterator *iterator)
+{
+	const struct span_base *span_base = span_offset_to_span_ptr(&iterator->stream->data, iterator->region.offset);
+	uint64_t region_end_offset = iterator->region.offset + span_get_total_size(span_base);
+	struct pmemstream_entry entry = {.offset = iterator->offset};
+
+	bool entry_valid = iterator->offset < region_end_offset &&
+		validate_entry(iterator->stream, iterator->region_runtime, entry);
+
+	if (!entry_valid && iterator->perform_recovery &&
+	    region_runtime_get_state_acquire(iterator->region_runtime) == REGION_RUNTIME_STATE_UNINITIALIZED) {
+		region_runtime_initialize_for_read_locked(iterator->region_runtime, entry);
+	}
+
+	return entry_valid;
+}
