@@ -39,13 +39,15 @@ struct pmemstream_region_runtime {
 	struct pmemstream_region region;
 
 	/*
-	 * Offset at which new entries will be appended.
+	 * Offset at which new entries will be appended. Only valid in REGION_RUNTIME_STATE_WRITE_READY.
 	 */
 	uint64_t append_offset;
 
 	/*
 	 * All entries which start at offset < committed_offset can be treated as committed and safely read
-	 * from multiple threads.
+	 * from multiple threads. If region is in REGION_RUNTIME_STATE_READ_READY, it serves only as a hint - there
+	 * might be valid entires after committed_offset, which were not yet processed. If region is in
+	 * REGION_RUNTIME_STATE_WRITE_READY then there no valid entires after committed_offset.
 	 *
 	 * XXX: committed offset is not reliable in case of concurrent appends to the same region. The reason is
 	 * that it is updated in pmemstream_publish/pmemstream_sync, potentially in different order than append_offset.
@@ -122,7 +124,7 @@ static int region_runtimes_map_create_or_fail(struct region_runtimes_map *map, s
 	runtime->region = region;
 	runtime->state = REGION_RUNTIME_STATE_READ_READY;
 	runtime->append_offset = PMEMSTREAM_INVALID_OFFSET;
-	runtime->committed_offset = PMEMSTREAM_INVALID_OFFSET;
+	runtime->committed_offset = region.offset + offsetof(struct span_region, data);
 
 	int ret = pthread_mutex_init(&runtime->region_lock, NULL);
 	if (ret) {
@@ -233,19 +235,14 @@ static void region_runtime_initialize_for_write_no_lock(struct pmemstream_region
 	__atomic_store_n(&region_runtime->state, REGION_RUNTIME_STATE_WRITE_READY, __ATOMIC_RELEASE);
 }
 
-static void region_runtime_initialize_for_write_locked(struct pmemstream_region_runtime *region_runtime,
-						       uint64_t offset)
+static void region_runtime_try_increase_committed_offset_no_lock(struct pmemstream_region_runtime *region_runtime,
+						       uint64_t new_committed_offset)
 {
-	if (region_runtime_get_state_acquire(region_runtime) == REGION_RUNTIME_STATE_READ_READY) {
-		pthread_mutex_lock(&region_runtime->region_lock);
-		if (region_runtime_get_state_acquire(region_runtime) == REGION_RUNTIME_STATE_READ_READY) {
-			region_runtime_initialize_for_write_no_lock(region_runtime, offset);
-		}
-		pthread_mutex_unlock(&region_runtime->region_lock);
-	}
+	/* invariant, should always run under a lock. */
+	assert(pthread_mutex_trylock(&region_runtime->region_lock) != 0);
 
-	assert(region_runtime_get_state_acquire(region_runtime) == REGION_RUNTIME_STATE_WRITE_READY);
-	assert(region_runtime_get_append_offset_acquire(region_runtime) != PMEMSTREAM_INVALID_OFFSET);
+	if (new_committed_offset > region_runtime->committed_offset)
+		__atomic_store_n(&region_runtime->committed_offset, new_committed_offset, __ATOMIC_RELAXED);
 }
 
 static int region_runtime_iterate_and_initialize_for_write_no_lock(struct pmemstream *stream,
@@ -262,6 +259,10 @@ static int region_runtime_iterate_and_initialize_for_write_no_lock(struct pmemst
 	if (ret) {
 		return ret;
 	}
+
+	/* Start from highest, known valid offset. */
+	iterator.offset = region_runtime->committed_offset;
+	assert(iterator.offset >= region.offset + offsetof(struct span_region, data));
 
 	struct pmemstream_entry entry = {.offset = PMEMSTREAM_INVALID_OFFSET};
 	while (pmemstream_entry_iterator_next(&iterator, NULL, &entry) == 0) {
@@ -306,23 +307,13 @@ int region_runtime_iterate_and_initialize_for_write_locked(struct pmemstream *st
 	return ret;
 }
 
-static bool check_entry_consistency_and_maybe_recover_region(struct pmemstream_entry_iterator *iterator)
+static bool check_entry_consistency_and_maybe_recover_region_no_lock(struct pmemstream_entry_iterator *iterator)
 {
-	const struct span_region *span_region =
-		(const struct span_region *)span_offset_to_span_ptr(&iterator->stream->data, iterator->region.offset);
-	uint64_t region_end_offset = iterator->region.offset + span_get_total_size(&span_region->span_base);
+	/* invariant, should always run under a lock. */
+	assert(pthread_mutex_trylock(&region_runtime->region_lock) != 0);
 
-	if (iterator->offset >= region_end_offset) {
-		goto invalid_entry;
-	}
-
-	/* XXX: reading this span metadata is potentially dangerous. It might happen so that
-	 * before calling this function region_runtime is in READ_READY state but some other thread
-	 * changes it to WRITE_READY while span metadata is read. We might fix this using Optimistic Locking.
-	 */
-	const struct span_base *span_base = span_offset_to_span_ptr(&iterator->stream->data, iterator->offset);
 	if (span_get_type(span_base) != SPAN_ENTRY) {
-		goto invalid_entry;
+		return false;
 	}
 
 	const struct span_entry *span_entry = (const struct span_entry *)span_base;
@@ -334,31 +325,72 @@ static bool check_entry_consistency_and_maybe_recover_region(struct pmemstream_e
 	if (committed_timestamp < max_valid_timestamp || max_valid_timestamp == PMEMSTREAM_INVALID_TIMESTAMP)
 		max_valid_timestamp = committed_timestamp;
 
-	if (span_entry->timestamp < max_valid_timestamp) {
-		return true;
-	}
-
-invalid_entry:
-	if (iterator->perform_recovery) {
-		region_runtime_initialize_for_write_locked(iterator->region_runtime, iterator->offset);
-	}
-	return false;
+	return span_entry->timestamp < max_valid_timestamp;
 }
 
+static bool check_entry_consistency_and_maybe_recover_region_locked(struct pmemstream_entry_iterator *iterator)
+{
+	const struct span_base *span_base = span_offset_to_span_ptr(&iterator->stream->data, iterator->offset);
+
+	bool ret;
+	pthread_mutex_lock(&iterator->region_runtime->region_lock);
+	if (region_runtime_get_state_acquire(region_runtime) == REGION_RUNTIME_STATE_READ_READY) {
+		uint64_t entry_end_offset = iterator->offset + span_get_total_size(span_base);
+		ret = check_entry_consistency_and_maybe_recover_region_no_lock(iterator);
+		if (ret) {
+			region_runtime_try_increase_committed_offset_no_lock(region_runtime, entry_end_offset);
+		}
+	} else {
+		ret = iterator->offset < committed_offset;
+	}
+	pthread_mutex_unlock(&region_runtime->region_lock);
+
+	return ret;
+}
+
+static bool entry_iterator_is_inside_region(struct pmemstream_entry_iterator *iterator)
+{
+	const struct span_region *span_region =
+		(const struct span_region *)span_offset_to_span_ptr(&iterator->stream->data, iterator->region.offset);
+	uint64_t region_end_offset = iterator->region.offset + span_get_total_size(&span_region->span_base);
+
+	return iterator->offset >= region_end_offset;
+}
+
+/* If region is in REGION_RUNTIME_STATE_WRITE_READY, just checks if offset of the iterator is
+ * below committed_offset. Otherwise, if there is a valid entry which was already seen (possibly by
+ * other iterator) this function detects this by also looking at the committed_offset.
+ * 
+ * If committed_offset is smaller then iterator->offset and region is in REGION_RUNTIME_STATE_READ_READY then
+ * this function checks consistency of the entry under a lock and tries to increase committed_offset to after
+ * new entry.
+ */ 
 bool check_entry_and_maybe_recover_region(struct pmemstream_entry_iterator *iterator)
 {
-	if (region_runtime_get_state_acquire(iterator->region_runtime) == REGION_RUNTIME_STATE_READ_READY)
-		return check_entry_consistency_and_maybe_recover_region(iterator);
+	if (region_runtime_get_state_acquire(iterator->region_runtime) == REGION_RUNTIME_STATE_READ_READY) {
+		if (iterator->offset < region_runtime_get_committed_offset_acquire(iterator->region_runtime)) {
+			return true;
+		}
+
+		if (!entry_iterator_is_inside_region(iterator)) {
+			return false;
+		}
+
+		/* Possible new entry encountered. */
+		return check_entry_consistency_and_maybe_recover_region_locked(iterator);
+	}
+
+	/* We must load committed_offset after calling region_runtime_get_state_acquire to make sure we see the newest value. */
+	uint64_t committed_offset = region_runtime_get_committed_offset_acquire(iterator->region_runtime);
 
 	/* Make sure that we didn't go beyond committed entries. */
-	uint64_t committed_offset = region_runtime_get_committed_offset_acquire(iterator->region_runtime);
 	if (iterator->offset >= committed_offset) {
 		return false;
 	}
 
 	/* Region is already recovered, and we did not encounter end of the data yet.
 	 * Span must be a valid entry. */
-	assert(check_entry_consistency_and_maybe_recover_region(iterator));
+	assert(check_entry_consistency_and_maybe_recover_region_locked(iterator));
 
 	return true;
 }
