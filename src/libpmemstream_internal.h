@@ -26,8 +26,8 @@ extern "C" {
 
 #define PMEMSTREAM_INVALID_TIMESTAMP 0ULL
 
-/* XXX: lift this requirement */
-#define PMEMSTREAM_MAX_CONCURRENCY 64ULL
+/* XXX: make this a parameter */
+#define PMEMSTREAM_MAX_CONCURRENCY 1024ULL
 
 struct pmemstream_header {
 	char signature[PMEMSTREAM_SIGNATURE_SIZE];
@@ -43,6 +43,15 @@ struct pmemstream_header {
 	struct allocator_header region_allocator_header;
 };
 
+struct async_operation {
+	struct vdm_operation_future future;
+	struct pmemstream_region region;
+	struct pmemstream_entry entry;
+	struct pmemstream_region_runtime *region_runtime;
+	size_t size;
+	pthread_mutex_t lock;
+};
+
 struct pmemstream {
 	/* Points to pmem-resided header. */
 	struct pmemstream_header *header;
@@ -55,8 +64,13 @@ struct pmemstream {
 	size_t block_size;
 
 	struct region_runtimes_map *region_runtimes_map;
-	struct mpmc_queue *timestamp_queue;
-	struct thread_id *thread_id;
+
+	uint64_t committed_timestamp;
+
+	struct async_operation async_ops[PMEMSTREAM_MAX_CONCURRENCY];
+	uint64_t next_timestamp;
+
+	pthread_mutex_t commit_lock;
 };
 
 static inline int pmemstream_validate_stream_and_offset(struct pmemstream *stream, uint64_t offset)
@@ -85,7 +99,7 @@ static inline uint64_t pmemstream_persisted_timestamp(struct pmemstream *stream)
 
 static inline uint64_t pmemstream_committed_timestamp(struct pmemstream *stream)
 {
-	return mpmc_queue_get_consumed_offset(stream->timestamp_queue) + 1;
+	return __atomic_load_n(&stream->committed_timestamp, __ATOMIC_ACQUIRE);
 }
 
 #ifdef __cplusplus

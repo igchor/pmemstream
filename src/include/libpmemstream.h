@@ -33,36 +33,17 @@ struct pmemstream_entry {
 	uint64_t offset;
 };
 
-/* async publish data, filled with data from user and from pmemstream_reserve */
-struct pmemstream_async_publish_data {
+struct pmemstream_async_wait_committed_data {
 	struct pmemstream *stream;
-	struct pmemstream_region region;
 	struct pmemstream_region_runtime *region_runtime;
-	const void *data;
-	size_t size;
-	struct pmemstream_entry reserved_entry;
+	uint64_t timestamp;
 };
 
-/* async publish output */
-struct pmemstream_async_publish_output {
+struct pmemstream_async_wait_committed_output {
 	int error_code;
 };
 
-FUTURE(pmemstream_async_publish_fut, struct pmemstream_async_publish_data, struct pmemstream_async_publish_output);
-
-/* async append data - two chained futures needed to complete append */
-struct pmemstream_async_append_data {
-	FUTURE_CHAIN_ENTRY(struct vdm_operation_future, memcpy);
-	FUTURE_CHAIN_ENTRY(struct pmemstream_async_publish_fut, publish);
-};
-
-/* async append returns new entry's offset on success (error_code == 0) */
-struct pmemstream_async_append_output {
-	int error_code;
-	struct pmemstream_entry new_entry;
-};
-
-FUTURE(pmemstream_async_append_fut, struct pmemstream_async_append_data, struct pmemstream_async_append_output);
+FUTURE(pmemstream_async_wait_committed_fut, struct pmemstream_async_wait_committed_data, struct pmemstream_async_wait_committed_output);
 
 // manages lifecycle of the stream. Can be based on top of a raw pmem2_map
 // or a pmemset (TBD).
@@ -99,17 +80,14 @@ int pmemstream_region_runtime_initialize(struct pmemstream *stream, struct pmems
  * data is updated with a pointer to reserved space - this is a destination for, e.g., custom memcpy. */
 int pmemstream_reserve(struct pmemstream *stream, struct pmemstream_region region,
 		       struct pmemstream_region_runtime *region_runtime, size_t size,
-		       struct pmemstream_entry *reserved_entry, void **data);
+		       struct pmemstream_entry *reserved_entry, void **data, uint64_t *timestamp);
 
 /* Publish previously custom-written entry.
  * After calling pmemstream_reserve and writing/memcpy'ing data into a reserved_entry, it's required
  * to call this function for setting proper entry's metadata and persist the data.
- *
- * *data has to hold the same data as they were written by user (e.g. in custom memcpy).
- * size of the entry have to match the previous reservation and the actual size of the data written by user. */
+ */
 int pmemstream_publish(struct pmemstream *stream, struct pmemstream_region region,
-		       struct pmemstream_region_runtime *region_runtime, const void *data, size_t size,
-		       struct pmemstream_entry reserved_entry);
+		       struct pmemstream_region_runtime *region_runtime, uint64_t timestamp);
 
 /* Synchronously appends data buffer after last valid entry in region.
  * Fails if no space is available.
@@ -128,19 +106,20 @@ int pmemstream_append(struct pmemstream *stream, struct pmemstream_region region
 		      struct pmemstream_entry *new_entry);
 
 /* asynchronous publish, using libminiasync */
-struct pmemstream_async_publish_fut pmemstream_async_publish(struct pmemstream *stream, struct pmemstream_region region,
+int pmemstream_async_publish(struct pmemstream *stream, struct pmemstream_region region,
 							     struct pmemstream_region_runtime *region_runtime,
-							     const void *data, size_t size,
-							     struct pmemstream_entry reserved_entry);
+							     uint64_t timestamp);
 
 /* asynchronous append, using libminiasync */
-struct pmemstream_async_append_fut pmemstream_async_append(struct pmemstream *stream, struct vdm *vdm,
+int pmemstream_async_append(struct pmemstream *stream, struct vdm *vdm,
 							   struct pmemstream_region region,
 							   struct pmemstream_region_runtime *region_runtime,
-							   const void *data, size_t size);
+							   const void *data, size_t size, uint64_t *timestamp);
 
 /* Returns pointer to the data of the entry. Assumes that 'entry' points to a valid entry. */
 const void *pmemstream_entry_data(struct pmemstream *stream, struct pmemstream_entry entry);
+
+uint64_t pmemstream_entry_timestamp(struct pmemstream *stream, struct pmemstream_entry entry);
 
 /* Returns the size of the entry. Assumes that 'entry' points to a valid entry. */
 size_t pmemstream_entry_length(struct pmemstream *stream, struct pmemstream_entry entry);
