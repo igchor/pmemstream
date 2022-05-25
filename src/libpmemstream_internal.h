@@ -24,8 +24,6 @@ extern "C" {
 #define PMEMSTREAM_SIGNATURE ("PMEMSTREAM")
 #define PMEMSTREAM_SIGNATURE_SIZE (64)
 
-#define PMEMSTREAM_INVALID_TIMESTAMP 0ULL
-
 /* XXX: make this a parameter */
 #define PMEMSTREAM_MAX_CONCURRENCY 1024ULL
 
@@ -43,13 +41,17 @@ struct pmemstream_header {
 	struct allocator_header region_allocator_header;
 };
 
+/* Description of an async operation. */
 struct async_operation {
+	/* Data memcpy future */
 	struct vdm_operation_future future;
+
+	/* Description of append operation. */
 	struct pmemstream_region region;
 	struct pmemstream_entry entry;
-	struct pmemstream_region_runtime *region_runtime;
 	size_t size;
-	pthread_mutex_t lock;
+
+	struct pmemstream_region_runtime *region_runtime;
 };
 
 struct pmemstream {
@@ -65,12 +67,17 @@ struct pmemstream {
 
 	struct region_runtimes_map *region_runtimes_map;
 
+	/* All entries with timestamp strictly less than 'committed_timestamp' can be treated as committed. */
 	uint64_t committed_timestamp;
 
-	struct async_operation async_ops[PMEMSTREAM_MAX_CONCURRENCY];
+	/* This timestamp is used to generate timestamps for append. It is always monotnically increased. */
 	uint64_t next_timestamp;
 
-	pthread_mutex_t commit_lock;
+	/* Protects slots in async_ops array. */
+	pthread_mutex_t *async_ops_locks;
+
+	/* Stores in-progress operations, indexed by timestamp mod array size. */
+	struct async_operation *async_ops;
 };
 
 static inline int pmemstream_validate_stream_and_offset(struct pmemstream *stream, uint64_t offset)

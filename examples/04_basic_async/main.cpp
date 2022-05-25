@@ -87,7 +87,7 @@ int main(int argc, char *argv[])
 	/*
 	 * Example asynchronous append, executed with libminiasync functions
 	 */
-	/* Prepare environment and define async appends (as futures) */
+	/* Prepare environment and start async appends. */
 	struct data_mover_threads *dmt = data_mover_threads_default();
 	if (dmt == NULL) {
 		fprintf(stderr, "Failed to allocate data mover.\n");
@@ -95,46 +95,28 @@ int main(int argc, char *argv[])
 	}
 	struct vdm *thread_mover = data_mover_threads_get_vdm(dmt);
 
-	struct pmemstream_async_append_fut append_futures[EXAMPLE_ASYNC_COUNT];
+	uint64_t timestamp;
 	for (int i = 0; i < EXAMPLE_ASYNC_COUNT; ++i) {
-		append_futures[i] = pmemstream_async_append(stream, thread_mover, regions[i], NULL, &example_data[i],
-							    sizeof(example_data[i]));
+		ret = pmemstream_async_append(stream, thread_mover, regions[i], NULL, &example_data[i],
+							    sizeof(example_data[i]), &timestamp);
+		if (ret) {
+			fprintf(stderr, "pmemstream_async_append failed\n");
+			return ret;
+		}
 	}
 
-	/* Now, execute these futures. */
+	/* Now, wait until all appends complete. */
+	pmemstream_async_wait_fut future = pmemstream_async_wait_persisted(stream, timestamp);
 
-	/* For simply scenarios just run and wait for multiple futures: */
-	// struct runtime *r = runtime_new();
-	// runtime_wait_multiple(r, futures, EXAMPLE_ASYNC_COUNT);
-
-	/* ... or alternatively manually poll until completion. */
-	int completed_futures[EXAMPLE_ASYNC_COUNT] = {0};
-	int completed = 0;
+	bool completed = false;
 	do {
-		for (int i = 0; i < EXAMPLE_ASYNC_COUNT; i++) {
-			if (!completed_futures[i] &&
-			    future_poll(FUTURE_AS_RUNNABLE(&append_futures[i]), NULL) == FUTURE_STATE_COMPLETE) {
-				completed_futures[i] = 1;
-				completed++;
-				printf("Future %d is complete!\n", i);
-
-				/* Since each append is done in an individual region, we may already, safely
-				 * read out and print appended value. */
-				struct pmemstream_async_append_output *out = FUTURE_OUTPUT(&append_futures[i]);
-				if (out->error_code != 0) {
-					fprintf(stderr, "pmemstream_append_async (no. %d) failed\n", i);
-					return out->error_code;
-				}
-				read_data = (const struct data_entry *)pmemstream_entry_data(stream, out->new_entry);
-				printf("async append (no. %d) read data: %lu\n", i, read_data->data);
-			}
-		}
+		completed = future_poll(FUTURE_AS_RUNNABLE(&future)) == FUTURE_STATE_COMPLETED;
 
 		/*
 		 * an additional user/application work could be done here
 		 */
 		printf("User work done here...\n");
-	} while (completed < EXAMPLE_ASYNC_COUNT);
+	} while (!completed);
 
 	/* cleanup */
 	data_mover_threads_delete(dmt);

@@ -33,17 +33,17 @@ struct pmemstream_entry {
 	uint64_t offset;
 };
 
-struct pmemstream_async_wait_committed_data {
+struct pmemstream_async_wait_data {
 	struct pmemstream *stream;
 	struct pmemstream_region_runtime *region_runtime;
 	uint64_t timestamp;
 };
 
-struct pmemstream_async_wait_committed_output {
+struct pmemstream_async_wait_output {
 	int error_code;
 };
 
-FUTURE(pmemstream_async_wait_committed_fut, struct pmemstream_async_wait_committed_data, struct pmemstream_async_wait_committed_output);
+FUTURE(pmemstream_async_wait_fut, struct pmemstream_async_wait_data, struct pmemstream_async_wait_output);
 
 // manages lifecycle of the stream. Can be based on top of a raw pmem2_map
 // or a pmemset (TBD).
@@ -115,6 +115,9 @@ int pmemstream_async_append(struct pmemstream *stream, struct vdm *vdm,
 							   struct pmemstream_region region,
 							   struct pmemstream_region_runtime *region_runtime,
 							   const void *data, size_t size, uint64_t *timestamp);
+
+struct pmemstream_async_wait_fut pmemstream_async_wait_committed(struct pmemstream *stream, uint64_t timestamp);
+struct pmemstream_async_wait_fut pmemstream_async_wait_persisted(struct pmemstream *stream, uint64_t timestamp);
 
 /* Returns pointer to the data of the entry. Assumes that 'entry' points to a valid entry. */
 const void *pmemstream_entry_data(struct pmemstream *stream, struct pmemstream_entry entry);
