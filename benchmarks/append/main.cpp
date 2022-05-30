@@ -212,32 +212,52 @@ class pmemstream_workload : public benchmark::workload_base {
  public:
 	pmemstream_workload(config &cfg) : cfg(cfg)
 	{
-		stream = make_pmemstream(cfg.path.c_str(), cfg.block_size, cfg.size);
+		stream = make_pmemstream(cfg.path.c_str(), cfg.block_size, cfg.size, true);
 	}
 
 	virtual void initialize() override
 	{
-		if (pmemstream_region_allocate(stream.get(), cfg.region_size, &region)) {
-			throw std::runtime_error("Error during region allocate!");
-		}
-		if (!cfg.null_region_runtime &&
-		    pmemstream_region_runtime_initialize(stream.get(), region, &region_runtime_ptr)) {
-			throw std::runtime_error("Error during getting region runtime!");
-		}
+//		if (pmemstream_region_allocate(stream.get(), cfg.region_size, &region)) {
+//			throw std::runtime_error("Error during region allocate!");
+//		}
+//		if (!cfg.null_region_runtime &&
+//		    pmemstream_region_runtime_initialize(stream.get(), region, &region_runtime_ptr)) {
+//			throw std::runtime_error("Error during getting region runtime!");
+//		}
 
 		auto bytes_to_generate = cfg.element_count * cfg.element_size;
 		prepare_data(bytes_to_generate);
 	}
 
+	pmemstream_region create_region(pmemstream* stream, config &cfg) {
+		static std::mutex m;
+		std::unique_lock<std::mutex> l(m);
+		pmemstream_region region;
+		int ret = pmemstream_region_allocate(stream, cfg.region_size, &region);
+		if (ret) throw std::runtime_error("allocate");
+		return region;
+	}
+
 	void perform() override
 	{
+		thread_local pmemstream_region region_t = create_region(stream.get(), cfg);
+
 		auto data_chunks = get_data_chunks();
+            	data_mover_sync *s = data_mover_sync_new();
 		for (size_t i = 0; i < data.size() * sizeof(uint64_t); i += cfg.element_size) {
-			if (pmemstream_append(stream.get(), region, region_runtime_ptr, data_chunks + i,
-					      cfg.element_size, NULL) < 0) {
-				throw std::runtime_error("Error while appending " + std::to_string(i) + " entry!");
+			if (region_t.offset != 0) {
+				if (pmemstream_async_append(stream.get(), data_mover_sync_get_vdm(s), region_t, NULL, data_chunks + i,
+						      cfg.element_size, NULL) < 0) {
+					throw std::runtime_error("Error while appending " + std::to_string(i) + " entry!");
+				}
+			} else {
+				if (pmemstream_append(stream.get(), region_t, NULL, data_chunks + i,
+						      cfg.element_size, NULL) < 0) {
+					throw std::runtime_error("Error while appending " + std::to_string(i) + " entry!");
+				}
 			}
 		}
+		data_mover_sync_delete(s);
 	}
 
 	void clean() override
