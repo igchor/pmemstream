@@ -7,6 +7,7 @@
 #define LIBPMEMSTREAM_INTERNAL_H
 
 #include <assert.h>
+#include <semaphore.h>
 
 #include <libminiasync.h>
 
@@ -47,6 +48,7 @@ struct async_operation {
 	struct vdm_operation_future future;
 
 	/* Description of append operation. */
+	uint64_t timestamp;
 	struct pmemstream_region region;
 	struct pmemstream_entry entry;
 	size_t size;
@@ -68,10 +70,10 @@ struct pmemstream {
 	struct region_runtimes_map *region_runtimes_map;
 
 	/* All entries with timestamp strictly less than 'committed_timestamp' can be treated as committed. */
-	uint64_t committed_timestamp;
+	alignas(CACHELINE_SIZE) uint64_t committed_timestamp;
 
 	/* This timestamp is used to generate timestamps for append. It is always increased monotonically. */
-	uint64_t next_timestamp;
+	alignas(CACHELINE_SIZE) uint64_t next_timestamp;
 
 	/* Protects slots in async_ops array. */
 	pthread_mutex_t *async_ops_locks;
@@ -86,6 +88,10 @@ struct pmemstream {
 
 	/* Protects increasing persisted timestamp. */
 	pthread_mutex_t persist_lock;
+
+	sem_t async_ops_semaphore;
+
+	alignas(CACHELINE_SIZE) uint64_t processing_timestamp;
 
 	/* Used to perform synchronous memcpy. */
 	struct data_mover_sync *data_mover_sync;
