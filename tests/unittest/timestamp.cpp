@@ -32,6 +32,7 @@ int handle_sigjump()
 	}
 
 	if (sigsetjmp(longjmp_buf, 1) != 0) {
+		test_dump_backtrace();
 		error_in_miniasync = 1;
 		return 1;
 	}
@@ -41,8 +42,9 @@ int handle_sigjump()
 
 void handle_miniasync_error()
 {
-	if (error_in_miniasync)
+	if (error_in_miniasync) {
 		throw std::runtime_error("Signal in miniasync!");
+	}
 }
 
 /**
@@ -108,7 +110,7 @@ std::tuple<std::vector<pmemstream_region>, size_t> generate_and_append_data(pmem
 
 	/* Multithreaded append to many regions with global ordering. */
 	const auto data = *rc::gen::container<std::vector<std::vector<std::string>>>(
-		concurrency_level, rc::gen::arbitrary<std::vector<std::string>>());
+	 	concurrency_level, rc::gen::just<std::vector<std::string>>({}));
 
 	if (async) {
 		multithreaded_asynchronous_append(stream, regions, data);
