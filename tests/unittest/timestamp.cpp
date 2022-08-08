@@ -31,6 +31,10 @@ void multithreaded_asynchronous_append(pmemstream_test_base &stream, const std::
 	std::vector<std::vector<future_type>> futures(data.size());
 
 	parallel_exec(data.size(), [&](size_t thread_id) {
+		if (sigsetjmp(longjmp_buf, 1) != 0) {
+			throw std::runtime_error("Signal handled!");
+		}
+
 		for (auto &chunk : data) {
 			futures[thread_id].emplace_back(stream.helpers.async_append(regions[thread_id], chunk));
 		}
