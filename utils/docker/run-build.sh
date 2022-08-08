@@ -37,7 +37,7 @@ function tests_clang_debug_cpp17_no_valgrind() {
 	mkdir build
 	cd build
 	cmake .. -DCMAKE_INSTALL_PREFIX=/usr
-	sudo make install -j${nproc}
+	sudo_password make install -j${nproc}
 	cd ..
 	cd ..
 
@@ -80,7 +80,7 @@ function build_gcc_debug_cpp17() {
 	mkdir build
 	cd build
 	cmake .. -DCMAKE_INSTALL_PREFIX=/usr
-	sudo make install -j${nproc}
+	sudo_password make install -j${nproc}
 	cd ..
 	cd ..
 
@@ -141,7 +141,7 @@ function tests_gcc_release_cpp17_no_valgrind() {
 	mkdir build
 	cd build
 	cmake .. -DCMAKE_INSTALL_PREFIX=/usr
-	sudo make install -j${nproc}
+	sudo_password make install -j${nproc}
 	cd ..
 	cd ..
 
@@ -185,7 +185,7 @@ function tests_clang_release_cpp20_no_valgrind() {
 	mkdir build
 	cd build
 	cmake .. -DCMAKE_INSTALL_PREFIX=/usr
-	sudo make install -j${nproc}
+	sudo_password make install -j${nproc}
 	cd ..
 	cd ..
 
