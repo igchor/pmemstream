@@ -12,7 +12,8 @@
 
 thread_local sigjmp_buf longjmp_buf;
 
-void sighandler(int sig) {
+void sighandler(int sig)
+{
 	if (sig == SIGSEGV)
 		siglongjmp(longjmp_buf, sig);
 	else
