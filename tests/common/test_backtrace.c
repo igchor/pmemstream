@@ -16,8 +16,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-int stop_ex;
-
 #ifdef USE_LIBUNWIND
 
 #define UNW_LOCAL_ONLY
@@ -159,7 +157,7 @@ void test_dump_backtrace(void)
  */
 void test_sighandler(int sig)
 {
-	stop_ex = sig;
+
 }
 
 /*
@@ -168,18 +166,5 @@ void test_sighandler(int sig)
  */
 void test_register_sighandlers(void)
 {
-	stop_ex = 0;
 
-#ifndef PMEMSTREAM_USE_TSAN
-	signal(SIGSEGV, test_sighandler);
-	signal(SIGABRT, test_sighandler);
-	signal(SIGILL, test_sighandler);
-	signal(SIGFPE, test_sighandler);
-	signal(SIGINT, test_sighandler);
-#ifndef _WIN32
-	signal(SIGALRM, test_sighandler);
-	signal(SIGQUIT, test_sighandler);
-	signal(SIGBUS, test_sighandler);
-#endif
-#endif
 }

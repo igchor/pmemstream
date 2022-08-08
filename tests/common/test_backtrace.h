@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-extern int stop_ex;
+#include <setjmp.h>
 
 void test_dump_backtrace(void);
 void test_sighandler(int sig);

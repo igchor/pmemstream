@@ -8,6 +8,16 @@
 #include "stream_helpers.hpp"
 #include "thread_helpers.hpp"
 #include "unittest.hpp"
+#include <signal.h>
+
+thread_local sigjmp_buf longjmp_buf;
+
+void sighandler(int sig) {
+	if (sig == SIGSEGV)
+		siglongjmp(longjmp_buf, sig);
+	else
+		exit(128 + sig);
+}
 
 /**
  * timestamp - unit test for testing method pmemstream_entry_timestamp()
@@ -30,12 +40,13 @@ void multithreaded_asynchronous_append(pmemstream_test_base &stream, const std::
 	}
 
 	parallel_exec(data.size(), [&](size_t thread_id) {
+		if (sigsetjmp(longjmp_buf, 1) != 0) {
+			throw std::runtime_error("Signal handled!");
+		}
+
 		for (auto &fut : futures[thread_id]) {
-			while (fut.poll() != FUTURE_STATE_COMPLETE) {
-				if (stop_ex) {
-					throw std::runtime_error(std::to_string(stop_ex));
-				}
-			}
+			while (fut.poll() != FUTURE_STATE_COMPLETE)
+				;
 		}
 	});
 }
@@ -101,21 +112,23 @@ int main(int argc, char *argv[])
 	struct test_config_type test_config;
 	test_config.filename = std::string(argv[1]);
 
+	signal(SIGSEGV, sighandler);
+
 	return run_test(test_config, [&] {
 		return_check ret;
 
 		ret += rc::check(
 			"timestamp values should globally increase in multi-region environment after asynchronous append",
 			[&](pmemstream_with_multi_empty_regions &&stream) {
+				if (sigsetjmp(longjmp_buf, 1) != 0) {
+					throw std::runtime_error("Signal handled!");
+				}
+
 				auto [regions, elements] =
 					generate_and_append_data(stream, test_config, true /* async */);
 
 				/* Global ordering validation */
 				UT_ASSERT(stream.helpers.validate_timestamps_no_gaps(regions));
-
-				if (stop_ex) {
-					throw std::runtime_error(std::to_string(stop_ex));
-				}
 			});
 	});
 }
