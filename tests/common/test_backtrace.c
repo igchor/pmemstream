@@ -16,6 +16,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+int stop_ex;
+
 #ifdef USE_LIBUNWIND
 
 #define UNW_LOCAL_ONLY
@@ -157,12 +159,7 @@ void test_dump_backtrace(void)
  */
 void test_sighandler(int sig)
 {
-#ifndef PMEMSTREAM_USE_TSAN
-	printf("\nSignal: %s, backtrace:\n", strsignal(sig));
-	test_dump_backtrace();
-	printf("\n");
-	exit(128 + sig);
-#endif
+	stop_ex = sig;
 }
 
 /*
@@ -171,6 +168,8 @@ void test_sighandler(int sig)
  */
 void test_register_sighandlers(void)
 {
+	stop_ex = 0;
+
 #ifndef PMEMSTREAM_USE_TSAN
 	signal(SIGSEGV, test_sighandler);
 	signal(SIGABRT, test_sighandler);

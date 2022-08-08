@@ -31,8 +31,11 @@ void multithreaded_asynchronous_append(pmemstream_test_base &stream, const std::
 
 	parallel_exec(data.size(), [&](size_t thread_id) {
 		for (auto &fut : futures[thread_id]) {
-			while (fut.poll() != FUTURE_STATE_COMPLETE)
-				;
+			while (fut.poll() != FUTURE_STATE_COMPLETE) {
+				if (stop_ex) {
+					throw std::runtime_error(std::to_string(stop_ex));
+				}
+			}
 		}
 	});
 }
