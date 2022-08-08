@@ -112,6 +112,10 @@ int main(int argc, char *argv[])
 
 				/* Global ordering validation */
 				UT_ASSERT(stream.helpers.validate_timestamps_no_gaps(regions));
+
+				if (stop_ex) {
+					throw std::runtime_error(std::to_string(stop_ex));
+				}
 			});
 	});
 }
