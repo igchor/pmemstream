@@ -50,7 +50,7 @@ function tests_clang_debug_cpp17_no_valgrind() {
 		-DBUILD_BENCHMARKS=1
 
 	make -j$(nproc)
-	ctest --output-on-failure --timeout ${TEST_TIMEOUT}
+	ctest -R timestamp_0_none --output-on-failure --timeout ${TEST_TIMEOUT}
 	if [ "${COVERAGE}" == "1" ]; then
 		upload_codecov tests_clang_debug_cpp17
 	fi
@@ -92,7 +92,7 @@ function build_gcc_debug_cpp17() {
 function tests_gcc_debug_cpp17_no_valgrind() {
 	printf "\n$(tput setaf 1)$(tput setab 7)BUILD ${FUNCNAME[0]} START$(tput sgr 0)\n"
 	build_gcc_debug_cpp17
-	ctest -E "_memcheck|_drd|_helgrind|_pmemcheck" --timeout ${TEST_TIMEOUT} --output-on-failure
+	ctest -R timestamp_0_none -E "_memcheck|_drd|_helgrind|_pmemcheck" --timeout ${TEST_TIMEOUT} --output-on-failure
 	if [ "${COVERAGE}" == "1" ]; then
 		upload_codecov tests_gcc_debug_cpp17
 	fi
@@ -106,7 +106,7 @@ function tests_gcc_debug_cpp17_no_valgrind() {
 function tests_gcc_debug_cpp17_valgrind() {
 	printf "\n$(tput setaf 1)$(tput setab 7)BUILD ${FUNCNAME[0]} START$(tput sgr 0)\n"
 	build_gcc_debug_cpp17
-	ctest -R "_memcheck|_drd|_helgrind|_pmemcheck" --timeout ${TEST_TIMEOUT} --output-on-failure
+	ctest -R timestamp_0_none --timeout ${TEST_TIMEOUT} --output-on-failure
 	workspace_cleanup
 	printf "$(tput setaf 1)$(tput setab 7)BUILD ${FUNCNAME[0]} END$(tput sgr 0)\n\n"
 }
@@ -138,7 +138,7 @@ function tests_gcc_release_cpp17_no_valgrind() {
 
 	make -j$(nproc)
 
-	ctest -E "_memcheck|_drd|_helgrind|_pmemcheck" --timeout ${TEST_TIMEOUT} --output-on-failure
+	ctest -R timestamp_0_none -E "_memcheck|_drd|_helgrind|_pmemcheck" --timeout ${TEST_TIMEOUT} --output-on-failure
 	if [ "${COVERAGE}" == "1" ]; then
 		upload_codecov tests_gcc_release_cpp17
 	fi
@@ -171,7 +171,7 @@ function tests_clang_release_cpp20_no_valgrind() {
 		-DUSE_UBSAN=${TESTS_UBSAN}
 
 	make -j$(nproc)
-	ctest --output-on-failure --timeout ${TEST_TIMEOUT}
+	ctest -R timestamp_0_none --output-on-failure --timeout ${TEST_TIMEOUT}
 	if [ "${COVERAGE}" == "1" ]; then
 		upload_codecov tests_clang_release_cpp20
 	fi
