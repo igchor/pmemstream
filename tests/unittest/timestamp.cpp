@@ -110,7 +110,7 @@ std::tuple<std::vector<pmemstream_region>, size_t> generate_and_append_data(pmem
 
 	/* Multithreaded append to many regions with global ordering. */
 	const auto data = *rc::gen::container<std::vector<std::vector<std::string>>>(
-	 	concurrency_level, rc::gen::just<std::vector<std::string>>({}));
+	 	concurrency_level, rc::gen::arbitrary<std::vector<std::string>>());
 
 	if (async) {
 		multithreaded_asynchronous_append(stream, regions, data);
