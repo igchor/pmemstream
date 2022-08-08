@@ -31,11 +31,19 @@ function tests_clang_debug_cpp17_no_valgrind() {
 	mkdir build
 	cd build
 
+	git clone https://github.com/igchor/miniasync
+	cd miniasync
+	git checkout repro
+	mkdir build
+	cd build
+	cmake .. -DCMAKE_INSTALL_PREFIX=/usr
+	make install -j${nproc}
+	cd ..
+	cd ..
+
 	PKG_CONFIG_PATH=${PKG_CONFIG_PATH}:/opt/pmdk/lib/pkgconfig/ \
 	CC=clang CXX=clang++ \
-	cmake .. -DDEVELOPER_MODE=1 \
-		-DCHECK_CPP_STYLE=${CHECK_CPP_STYLE} \
-		-DCMAKE_BUILD_TYPE=Debug \
+	cmake .. -DCMAKE_BUILD_TYPE=Debug \
 		-DCMAKE_INSTALL_PREFIX=${INSTALL_DIR} \
 		-DTRACE_TESTS=1 \
 		-DCOVERAGE=${COVERAGE} \
@@ -66,11 +74,19 @@ function build_gcc_debug_cpp17() {
 	mkdir build
 	cd build
 
+	git clone https://github.com/igchor/miniasync
+	cd miniasync
+	git checkout repro
+	mkdir build
+	cd build
+	cmake .. -DCMAKE_INSTALL_PREFIX=/usr
+	make install -j${nproc}
+	cd ..
+	cd ..
+
 	PKG_CONFIG_PATH=${PKG_CONFIG_PATH}:/opt/pmdk/lib/pkgconfig/ \
 	CC=gcc CXX=g++ \
-	cmake .. -DDEVELOPER_MODE=1 \
-		-DCHECK_CPP_STYLE=${CHECK_CPP_STYLE} \
-		-DCMAKE_BUILD_TYPE=Debug \
+	cmake .. -DCMAKE_BUILD_TYPE=Debug \
 		-DCMAKE_INSTALL_PREFIX=${INSTALL_DIR} \
 		-DTRACE_TESTS=1 \
 		-DCOVERAGE=${COVERAGE} \
@@ -119,10 +135,19 @@ function tests_gcc_release_cpp17_no_valgrind() {
 	mkdir build
 	cd build
 
+	git clone https://github.com/igchor/miniasync
+	cd miniasync
+	git checkout repro
+	mkdir build
+	cd build
+	cmake .. -DCMAKE_INSTALL_PREFIX=/usr
+	make install -j${nproc}
+	cd ..
+	cd ..
+
 	PKG_CONFIG_PATH=${PKG_CONFIG_PATH}:/opt/pmdk/lib/pkgconfig/ \
 	CC=gcc CXX=g++ \
-	cmake .. -DDEVELOPER_MODE=1 \
-		-DCHECK_CPP_STYLE=${CHECK_CPP_STYLE} \
+	cmake .. \
 		-DCMAKE_BUILD_TYPE=Release \
 		-DCMAKE_INSTALL_PREFIX=${INSTALL_DIR} \
 		-DTRACE_TESTS=1 \
@@ -154,11 +179,19 @@ function tests_clang_release_cpp20_no_valgrind() {
 	mkdir build
 	cd build
 
+	git clone https://github.com/igchor/miniasync
+	cd miniasync
+	git checkout repro
+	mkdir build
+	cd build
+	cmake .. -DCMAKE_INSTALL_PREFIX=/usr
+	make install -j${nproc}
+	cd ..
+	cd ..
+
 	PKG_CONFIG_PATH=${PKG_CONFIG_PATH}:/opt/pmdk/lib/pkgconfig/ \
 	CC=clang CXX=clang++ \
-	cmake .. -DDEVELOPER_MODE=1 \
-		-DCHECK_CPP_STYLE=${CHECK_CPP_STYLE} \
-		-DCMAKE_BUILD_TYPE=Release \
+	cmake .. -DCMAKE_BUILD_TYPE=Release \
 		-DCMAKE_INSTALL_PREFIX=${INSTALL_DIR} \
 		-DTRACE_TESTS=1 \
 		-DCOVERAGE=${COVERAGE} \

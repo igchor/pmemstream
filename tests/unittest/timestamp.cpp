@@ -10,6 +10,7 @@
 #include "unittest.hpp"
 #include <signal.h>
 
+int error_in_miniasync = 0;
 thread_local sigjmp_buf longjmp_buf;
 
 void sighandler(int sig)
@@ -20,6 +21,30 @@ void sighandler(int sig)
 		exit(128 + sig);
 }
 
+
+int handle_sigjump()
+{
+	thread_local int first = 0;
+	if (first == 0) {
+		signal(SIGSEGV, sighandler);
+		first = 1;
+		return 0;
+	}
+
+	if (sigsetjmp(longjmp_buf, 1) != 0) {
+		error_in_miniasync = 1;
+		return 1;
+	}
+
+	return 0;
+}
+
+void handle_miniasync_error()
+{
+	if (error_in_miniasync)
+		throw std::runtime_error("Signal in miniasync!");
+}
+
 /**
  * timestamp - unit test for testing method pmemstream_entry_timestamp()
  */
@@ -27,6 +52,8 @@ void sighandler(int sig)
 void multithreaded_asynchronous_append(pmemstream_test_base &stream, const std::vector<pmemstream_region> &regions,
 				       const std::vector<std::vector<std::string>> &data)
 {
+	stream.helpers.thread_mover_handle = std::unique_ptr<struct data_mover_threads, decltype(&data_mover_threads_delete)>(data_mover_threads_new(12, 128, FUTURE_NOTIFIER_WAKER, handle_sigjump), &data_mover_threads_delete);
+
 	using future_type = decltype(stream.helpers.async_append(regions[0], data[0]));
 	std::vector<std::vector<future_type>> futures(data.size());
 
@@ -38,20 +65,20 @@ void multithreaded_asynchronous_append(pmemstream_test_base &stream, const std::
 		for (auto &chunk : data) {
 			futures[thread_id].emplace_back(stream.helpers.async_append(regions[thread_id], chunk));
 		}
+
+		handle_miniasync_error();
 	});
+	handle_miniasync_error();
 	for (auto &future_sequence : futures) {
 		std::mt19937_64 g(*rc::gen::arbitrary<size_t>());
 		std::shuffle(future_sequence.begin(), future_sequence.end(), g);
 	}
 
 	parallel_exec(data.size(), [&](size_t thread_id) {
-		if (sigsetjmp(longjmp_buf, 1) != 0) {
-			throw std::runtime_error("Signal handled!");
-		}
-
+		handle_miniasync_error();
 		for (auto &fut : futures[thread_id]) {
 			while (fut.poll() != FUTURE_STATE_COMPLETE)
-				;
+				handle_miniasync_error();
 		}
 	});
 }
@@ -131,6 +158,8 @@ int main(int argc, char *argv[])
 
 				auto [regions, elements] =
 					generate_and_append_data(stream, test_config, true /* async */);
+
+				handle_miniasync_error();
 
 				/* Global ordering validation */
 				UT_ASSERT(stream.helpers.validate_timestamps_no_gaps(regions));
